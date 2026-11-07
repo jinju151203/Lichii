@@ -1,0 +1,49 @@
+{
+  "file": "Ocarina_Korean_Setup.exe",
+  "package": "0.2.5-ko2",
+  "bytes": 116667392,
+  "sha256": "e0539bd4aa16e228bf486c95f924b6243461afdf1bfa38a09179759e82fba22e",
+  "upstream": "sostenesfreitas/ocarina-recomp",
+  "upstream_release": "v0.2.5",
+  "upstream_main": "ada56edf88765399eb4b3d58cc6b7a11162ed58e",
+  "latest_checked_kst_date": "2026-11-08",
+  "local_source_commit": "6bfb6a62e25ebce5b595696a201569335f909cdf",
+  "original_setup_sha256": "3bbcdce1c1d13468cfcf53161f727289441184c1afd3499554530be2955cf34e",
+  "payload_sha256": "db76362966643a8ada843d4207039ba3f2614bf13f3d734a424ea514924f66a9",
+  "payload_bytes": 116648801,
+  "payload_files": 5731,
+  "native_translator_sha256": "e1dbb3edec16ebc117fe817e4a12c5e366d2453ccbbf5f93857017f1a2883cb5",
+  "native_translator_id": "d9fbd4d76801edff88afdc460bbac85855414055969f5606bac761039308f857",
+  "machine": "AMD64 (0x8664)",
+  "subsystem": "Windows GUI",
+  "native_game_built": false,
+  "tests": [
+    "17 exact input API names resolve through real runtime hostfn linker table",
+    "Closed input: no invalid object/Impl dereference, open/start fail, state/counts zero, format in x0/x1 and gain in v0 match ABI",
+    "Statistics writes exactly24 bytes with adjacent sentinels intact;3000 repeated calls; Purge logs once",
+    "New input shim, ov_system.c and localized menu compile for Windows x64; new shim passed -Wall -Wextra -Werror",
+    "Upstream nvn2_lower.cpp vk_exec_draw.c vk_texture.c compile for Windows x64 with runtime -Wall -Werror flags",
+    "33 graphics/timing/translation source files match pinned latest upstream bytes",
+    "Extra Sqrt shader transform and custom Ocarina scale UI absent",
+    "9 Korean catalog/config tests passed; actual ImGui447 glyphs at26px and52px without missing characters",
+    "12 save copy/discovery/backup/rollback tests and6 private export tests passed",
+    "Version update resets only preparation marker; cached bytes retained; same-version update keeps preparation",
+    "Actual launcher with authored processes: normal retains upstream default, quality passes BIG_CS=0, INI unchanged",
+    "Actual installer finalizer with COM stub creates5 valid shortcuts, including optional quality-test launch",
+    "Changed PowerShell parses, content guard and whitespace checks pass; patch applies to pinned original",
+    "PE GUI x64, CRC, exact embedded payload/source/bootstrap and asInvoker manifest verified"
+  ],
+  "quality_mode": {
+    "default": "upstream original default",
+    "optional": "Upscaler Test shortcut sets upstream TOTK_BIG_CS=0 for that process only",
+    "hardware_tested_here": false
+  },
+  "limitations": [
+    "No player NUP/ExeFS or reproducible gameplay log in this workspace",
+    "Actual Ocarina performance, song playback, startup stripes and pixel-like image defect have not been reproduced or verified fixed",
+    "API tests use authored CPU state and invalid unopened objects; they are not game playback tests",
+    "Optional native game upscaler can change GPU load and compilation time and is not verified on the player GPU",
+    "Native Windows GUI/full-game execution and full upstream suite were not run",
+    "Frame/resolution behavior follows upstream; no additional300FPS/internal4K enforcement"
+  ]
+}
