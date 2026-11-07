@@ -1,20 +1,41 @@
 {
   "file": "Ocarina_Korean_Setup.exe",
-  "bytes": 115989504,
-  "sha256": "2eec0d3c59c540637539f35abb6f6e8c761b693513ba607f49c66504043e3314",
+  "bytes": 149416448,
+  "sha256": "82c3aa0e4d59ee9c7d59ae4563bb60bf897a23d3f4ad39851e3f5c26b22b3351",
   "machine": "AMD64 (0x8664)",
   "subsystem": "Windows GUI",
-  "payload_zip_sha256": "75ceb4bc8963684df7bc9d42205c7b7d1cd3f9cb2064f80873730da61d882ed8",
+  "payload_zip_sha256": "0cdf98975859f8e0778c4d723a423ce762fa17c967579fb99f2840663035504b",
   "payload_integrity": "exact byte match to CRC-checked setup ZIP",
   "native_game_built": false,
   "reason": "Player NUP not present in this workspace",
+  "package": "0.2.1-ko2",
   "tests": [
+    "12 save migration and rollback tests passed",
+    "PowerShell-to-Python save import passed with Korean/bracket/space paths",
+    "295 C0 layout checks passed",
+    "Rebuilt translator:32 relocated C0 candidates and unknown-ABI refusal passed",
+    "Windows x64 compiler: gfx_shader.c vk_exec_draw.c menu.cpp passed",
+    "Diagnostics ZIP excluded game and saves and bounded both logs",
     "9 Korean catalog/config/font tests passed",
     "447 glyphs rendered with actual ImGui at26px and52px",
     "ui_text.c cfg.c menu.cpp compiled for Windows x64 with clang23",
     "62 installer messages: three languages, PowerShell parse and switching passed",
-    "bootstrap PowerShell parse and5685-file extraction passed",
+    "ko2 bootstrap PowerShell parse and6151-file extraction passed",
     "source-content check and git diff whitespace check passed",
-    "x64 PE resources, embedded ZIP, bootstrap and asInvoker manifest matched"
-  ]
+    "x64 PE resources, embedded ZIP, bootstrap and asInvoker manifest matched",
+    "ko2 source patch applies to pinned upstream and passes the content guard"
+  ],
+  "remaining": [
+    "Actual300FPS not implemented/verified",
+    "Internal4K game patch missing",
+    "Universal flicker resolution not verified",
+    "User NUP/ExeFS and a reproducible game log unavailable"
+  ],
+  "additional_test_limitations": [
+    "build_xlate_options_test.py:1 failure and1 error, reproduced on ko1 baseline",
+    "f2i_byte_test.py:existing evaluator cannot interpret GLSL instruction80; not passed"
+  ],
+  "translator_sha256": "2cb3b5a1dde311708cccbe350e46da4938031960e5ad8c3637ac82d6d37ce575",
+  "translator_id": "c79c4372d2cefc41ccf65fff287334a93eab014294f182d5cbd736cf73d60541",
+  "upstream_graphics_fix": "d637fa727e6b2de860411478fca50a6439d1e4a9"
 }
