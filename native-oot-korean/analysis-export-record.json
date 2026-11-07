@@ -1,0 +1,42 @@
+{
+  "file": "Ocarina_Analysis_Export.exe",
+  "package": "0.2.1-ko3",
+  "bytes": 48128,
+  "sha256": "2c4e8b5648cb4b6657672432f4956c6dc1af63d6ea3cda234663dd815c6abaf4",
+  "machine": "AMD64 (0x8664)",
+  "subsystem": "Windows GUI",
+  "payload_bytes": 31827,
+  "payload_sha256": "de67cc6aebf4cb5505afebd6b28e917caab9bf11e14d692233ebae37f9fbd543",
+  "purpose": "Standalone private analysis exporter for an existing installation; does not install, compile, change graphics or automatically upload.",
+  "tests": [
+    "x64 PE, ZIP CRC, exact embedded source and bootstrap, original filename and asInvoker manifest passed",
+    "Windows x64 C host compiled with -Wall -Wextra -Werror",
+    "6 private-export tests passed, including whitelist, byte hashes, links, Unicode paths, existing input/output protection",
+    "Standalone PowerShell exporter with separate kit and installation roots passed using authored modules",
+    "PowerShell argument transport passed with Korean, brackets, quotes and trailing backslash",
+    "Graphics diagnostics retained six requested visual settings and excluded unknown keys, game and saves",
+    "5 instrumented performance-policy scenarios passed",
+    "Changed runtime sources compiled for Windows x64 with -Werror",
+    "9 Korean UI/config/font tests passed; actual ImGui 447 glyphs at26px/52px passed",
+    "Complete ko3 source patch applies cleanly to pinned upstream base"
+  ],
+  "remaining": [
+    "User NUP/ExeFS and reproducible gameplay logs have not been supplied",
+    "Actual300FPS and internal4K are not implemented/verified",
+    "Screenshot shows dark character materials with bright specks; the cause and fix are not confirmed",
+    "No native Windows GUI execution or game scene performance/graphics test in this Linux workspace"
+  ],
+  "existing_installer": {
+    "file": "Ocarina_Korean_Setup.exe",
+    "package": "0.2.1-ko2",
+    "sha256": "82c3aa0e4d59ee9c7d59ae4563bb60bf897a23d3f4ad39851e3f5c26b22b3351",
+    "updated_this_turn": false
+  },
+  "source_upstream_fixes": [
+    "fe2a2f82a22bb7667a7e42bd600c61394aa983ef",
+    "4ca966ba4d81c1c13e7715b2503d1cf8b8df2b81"
+  ],
+  "local_source_commit": "f8a176909d9f894847d7d4f41fd126c8bfa568b5",
+  "source_base": "9fb47c63fe9d1021dc9dd9b03210477108e72f54",
+  "source_patch_sha256": "7ea6790bb9bdb18b9f29e52e33dc16b5ff827cf241df6b0e645c99909ff540c0"
+}
