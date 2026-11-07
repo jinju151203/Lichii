@@ -1,40 +1,89 @@
-# Ocarina Recomp 한국어 Windows 소스와 분석 도구
+# Ocarina Recomp 한국어 업데이트 0.2.5-ko1
 
-배포 중인 전체 설치 EXE는 **0.2.1-ko2**입니다. 이 폴더의 **ko3은 개발 소스와 독립 분석 도구**입니다. 기존 설치 EXE가 ko3으로 바뀐 것은 아닙니다. Lichii 실행 파일용 패치가 아니라 별도 네이티브 프로젝트 [sostenesfreitas/ocarina-recomp](https://github.com/sostenesfreitas/ocarina-recomp)의 소스 수정이며, 기준은 `9fb47c63fe9d1021dc9dd9b03210477108e72f54`입니다.
+최신 정식판 **v0.2.5**와 `c4896f8ed5eb122510f36001ae34607d9c7af568` 소스를 기준으로 합니다.
+2026-11-08 한국 시간에 최신 릴리스와 main이 이 기준임을 확인했습니다.
+기반: https://github.com/sostenesfreitas/ocarina-recomp
 
-## ko3
+## 기존 설치에 업데이트
 
-- [원본 PR30](https://github.com/sostenesfreitas/ocarina-recomp/pull/30): 진단 환경 변수 읽기를 캐시하고 진단이 꺼진 draw의 진단용 재질 순회를 생략합니다. 렌더링 호출은 유지합니다.
-- [원본 PR31](https://github.com/sostenesfreitas/ocarina-recomp/pull/31): NVIDIA의 자동 백그라운드 파이프라인 컴파일을 1개 작업자로 제한합니다. 명시적인 사용자 설정과 다른 GPU 기본값은 유지합니다. 준비 시간이 길어지거나 새 구역에서 컴파일 대기가 늘 수 있습니다.
-- `Ocarina_Analysis_Export.exe`: 기존 설치를 선택해 본인 게임 실행 코드와 진단 로그를 개인 분석 ZIP으로 복사합니다. 재설치·재컴파일·그래픽 변경·자동 업로드를 하지 않습니다. RomFS, 세이브, NUP와 키는 수집하지 않습니다. ExeFS 실행 코드가 포함된 결과 ZIP을 GitHub 이슈나 PR에 올리지 마세요.
-- 진단에는 GPU·드라이버, 동적 알파 커버리지·색상·선명도·렌더링 설정과 제한된 길이의 실행 로그를 기록합니다. 사진의 검은 캐릭터·밝은 점 증상은 아직 재현하거나 원인을 확정하지 못했습니다.
+1. 게임과 Lichii를 종료하고 Ocarina_Korean_Setup.exe를 실행합니다.
+2. **기존 OcarinaRecomp 설치 폴더**를 선택합니다. 처음부터 지우지 마세요.
+3. 준비된 게임 파일을 재사용해 수정된 실행 파일을 빌드합니다. 저장 데이터와 기존 그래픽 설정을 유지합니다.
+4. 바탕 화면의 Ocarina Recomp로 실행합니다. 문제 재현 시 Ocarina Recomp - Diagnostics를 사용하세요.
 
-**실제300FPS·내부4K·모든 깜빡임 해결은 미완성입니다.** 성능 수정의 효과도 이 환경에서 실측하지 않았습니다. 사용자 NUP/ExeFS와 재현 로그가 없어 게임 자체 실행 및 장면 검증은 수행하지 못했습니다. `fps_limit`과 창 크기 설정만 바꿔 달성한 것처럼 표시하지 않습니다.
+새로 설치할 때는 본인이 가진 Switch 2판 1.1.1 NUP 또는 exefs/romfs 폴더가 필요합니다.
+이 EXE는 사용자의 게임 파일로 Windows x64 네이티브 실행 파일을 만드는 설치 도구입니다.
+게임 코드·게임 리소스·키는 포함하지 않습니다. 실제 게임은 build/oot111/ocarina.exe로 만들어집니다.
 
-## ko2에서 유지하는 내용
+## 이번에 반영한 내용
 
-Lichii `%APPDATA%/eden` 및 포터블 저장 위치 검색·계정 선택, 원본을 변경하지 않는 복사 검증·백업·실패 복구, 한국어 설치/메뉴/공개 글꼴, 진단 실행 바로 가기를 포함합니다. 메시 C0 테이블 충돌 수정 `d637fa727e6b2de860411478fca50a6439d1e4a9`와 일치하는 Windows x64 셰이더 변환기를 재생성했습니다. 이 수정의 실제 게임 장면 개선 범위는 아직 검증하지 못했습니다.
+- v0.2.5의 버퍼 복사 메모리 제한, 적은 VRAM의 ASTC BC3 기본값, Intel 캐시 저장 충돌 및 ASTC 디코딩 우회.
+- 일부 채널만 쓰는 셰이더 때문에 잎·잔디·수관의 조명이 검게 나오던 원본 수정과 메시 위치 보정.
+- 사용자 게임 파일로 셰이더를 미리 준비하는 원본 설치 단계. 처음 방문하는 모든 구역의 끊김이 없어지는 것은 아닙니다.
+- 바뀌지 않은 런타임 파일의 날짜를 유지하는 원본 업데이트 개선. 생성 C 패치도 내용이 같으면 날짜를 유지하며, 모든 앵커를 확인한 뒤 씁니다.
+- 실행 중인 같은 설치를 중복 실행하지 않으며, 비정상 종료 시 진단 ZIP을 자동 생성합니다. 최근 실행 로그 두 쌍도 함께 수집합니다.
+- 한국어 메뉴·설치·글꼴과 Lichii 계정 선택·저장 복사 검증·백업·실패 복구를 유지합니다.
 
-## 소스 적용
+이미 해결됐다고 보고된 링크의 그래픽 설정은 변경하지 않습니다. 별도 Sqrt 보정(PR91)은 선택 가능한 실험 코드이며 **기본값은 꺼짐**입니다.
+필요한 장면 분석 없이 켜지 않습니다. OOT_SQRT_CLAMP=2는 전 단계, =1은 compute만 적용하며 =0은 꺼짐입니다.
+원저자 코드에 범위·형식 검사와 작성한 GLSL 기반 SPIR-V 검사를 추가했습니다.
 
-각 패치는 아래 기준에 적용하는 **전체 패치**입니다. ko1/ko2 위에 ko3을 연속 적용하지 마세요.
+원본 v0.2.5의 AMD 드라이버 충돌 대처는 한 번 충돌한 파이프라인을 다음 실행에 최적화 없이 다시 시도하며,
+다시 충돌하면 해당 그리기를 생략합니다. 모든 종료나 화질 문제를 해결하는 기능이 아닙니다.
+
+## 화질과 프레임
+
+F1 → 화면 → **오카리나 내부 3D 비율**은 새 오카리나 전용 패치에 연결했습니다.
+자동은 게임의 동적 해상도이며 100은 출력 대비 고정 100%입니다. 125·150·200은 실험 옵션입니다.
+100 초과의 실제 렌더 타깃과 메모리·화질·속도는 이 환경에서 검증하지 못했습니다.
+화면이 검게 나오거나 느려지면 자동으로 복원하세요. 기존 그래픽 설정은 자동으로 덮어쓰지 않습니다.
+게임 출력 해상도를 바꾸지 않는 창 크기/FSR 확대를 내부 4K라고 표시하지 않습니다.
+
+**실제300FPS·내부4K·모든 깜빡임과 종료 해결은 미완성입니다.**
+오카리나에는 공통 고프레임 패치가 연결되어 있지 않으며 fps_limit=300만 쓰면 300FPS가 되지 않습니다.
+본인 NUP/ExeFS와 재현 로그가 이 작업 환경에 없어 실제 게임 빌드·플레이·FPS·내부 4K 실측을 수행하지 못했습니다.
+
+## 오카리나 연주 시 종료 / 끊김 조사
+
+원본의 마이크 입력 스트림 우회 코드는 유지했습니다. 이 코드가 있는 빌드에서 보고된 연주 시 종료는 아직 재현하지 못했습니다.
+종료 뒤 표시되는 **oot-diagnostics-날짜.zip**을 채팅에 첨부하고, 악기를 꺼낼 때/첫 음/특정 곡 중 어느 시점인지 적어 주세요.
+이 진단 ZIP은 GPU·드라이버, 설정과 제한된 길이의 실행 로그만 포함하며 게임·키·세이브는 수집하지 않습니다.
+설치 폴더 diagnostics에서도 찾을 수 있습니다. 자동 전송하지 않습니다.
+
+필요하면 Ocarina Recomp - Export Analysis로 본인 실행 코드와 진단을 별도 ZIP으로 복사할 수 있습니다.
+그 분석 ZIP에는 본인 게임의 main/sdk/subsdk0/rtld/main.npdm이 들어가므로 GitHub 이슈나 PR에는 올리지 마세요.
+NUP, RomFS, 세이브와 키는 포함하지 않습니다.
+
+## 언어와 저장
+
+게임 언어는 F1 → 게임에서, PC 설정 메뉴 언어는 F1 → 메뉴에서 변경합니다.
+게임 대사와 메뉴는 본인 게임 파일의 한국어 리소스를 사용합니다.
+설치 시 언어 키만 한국어로 변경하며, 기존 언어 설정은 totk.ini.before-korean.bak에 보관합니다.
+
+바탕 화면 **Ocarina Recomp - Lichii Save**에서 계정/폴더를 선택해 가져옵니다.
+원본 Lichii 저장은 변경하지 않고, 기존 포트 저장과 save-tx를 함께 백업한 후 교체합니다.
+게임과 Lichii를 닫은 상태에서 사용하세요.
+
+## 검사 범위와 소스
+
+구체적인 통과 검사와 파일 해시는 공개 소스 폴더의 build_record-0.2.5-ko1.json에 기록합니다.
+Windows 대상 컴파일, PowerShell 구문·연결과 데이터 보존, 작성한 셰이더 변환과 글꼴 검사는 실제 게임 실행 검증과 다릅니다.
+
+원본 GPL-3.0, 외부 도구 고지와 OFL 공개 메뉴 글꼴 라이선스를 유지합니다.
+설치판 projeto에 수정 소스를 포함합니다. 공개 소스 패치는 다음 위치에 보관합니다.
+https://github.com/jinju151203/Lichii/tree/codex/oot-korean-native/native-oot-korean
+
+## 이 폴더의 전체 소스 패치 적용
+
+`ocarina-recomp-0.2.5-ko1.patch`는 최신 정식판 v0.2.5에 적용하는 전체 한국어 수정입니다. 이전 ko1/ko2/ko3 패치와 연속 적용하지 마세요.
 
 ```sh
 git clone https://github.com/sostenesfreitas/ocarina-recomp.git
 cd ocarina-recomp
-git checkout -b korean-0.2.1-ko3 9fb47c63fe9d1021dc9dd9b03210477108e72f54
-git apply --check /path/to/ocarina-recomp-ko3.patch
-git apply /path/to/ocarina-recomp-ko3.patch
-python3 tools/oot/test_perf_policy.py
-python3 tools/oot/test_export_analysis.py
-python3 tools/oot/test_import_save.py
+git checkout -b korean-0.2.5-ko1 c4896f8ed5eb122510f36001ae34607d9c7af568
+git apply --check /path/to/ocarina-recomp-0.2.5-ko1.patch
+git apply /path/to/ocarina-recomp-0.2.5-ko1.patch
 python3 tools/check_content.py
 ```
 
-전체 설치 도구를 만들 때 셰이더 변환기는 .NET10 SDK에서 `python3 tools/build_xlate.py --managed-win64 --out build/xlate-managed`로 재생성합니다. 독립 분석 EXE 포장 코드는 `instalador/analysis-bootstrap.ps1`, `instalador/singlefile.c`, `tools/oot/package_singlefile.py --analysis`이며, `jogar/`, `tools/oot/export_analysis.py`, `import_save.py`와 라이선스 고지를 담은 게임 없는 ZIP을 입력합니다. 분석 도구는 기존 설치의 Python을 사용합니다.
-
-게임·키·생성된 게임 C·저장 데이터는 이 소스 패치에 없습니다. 원본 GPL-3.0 및 외부 구성 요소 고지를 유지합니다.
-
-`build_record.json`은 **ko2 설치 EXE** 기록이며, `analysis-export-record.json`은 별도 **ko3 분석 EXE**의 해시·검사·제한 기록입니다. Windows 대상 컴파일 및 PowerShell/Python 연결은 검사했지만 네이티브 Windows GUI와 실제 게임은 실행하지 못했습니다. 기존 `build_xlate_options_test.py`의1개 실패·1개 오류는 ko1에서도 재현되며, `f2i_byte_test.py`의 CPU 평가기는 기본 셰이더의 GLSL 연산80을 지원하지 않아 완료하지 못했습니다. 해당 검사를 통과했다고 기록하지 않았습니다.
-
-이전 ko1/ko2 패치와 ko2 배포 기록은 그대로 보관합니다.
+`build_record-0.2.5-ko1.json`이 현재 설치 EXE 기록입니다. 기존 `build_record.json`과 ko1/ko2/ko3 패치는 이전 배포 기록으로 보관합니다.
