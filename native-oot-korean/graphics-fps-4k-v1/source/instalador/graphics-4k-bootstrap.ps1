@@ -6,6 +6,6 @@ try {
     & (Join-Path $destination 'Ocarina-Graphics-4K/update-graphics-4k.ps1')
 } catch {
     Add-Type -AssemblyName System.Windows.Forms
-    [void][Windows.Forms.MessageBox]::Show($_.Exception.Message, '오카리나 그래픽 · FPS · 4K 업데이트', 'OK', 'Error')
+    [void][Windows.Forms.MessageBox]::Show($_.Exception.Message, '오카리나 그래픽 복구 v2', 'OK', 'Error')
     exit 1
 }

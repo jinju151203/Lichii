@@ -19,8 +19,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from fix_ocarina_playback import atomic_bytes, digest, linked_hooks, patched_source, safe_file
 from patch_generated import DYN_DT, FIXED_RES, upgrade_fixed_resolution
 
-UPDATE_ID = 'oot-graphics-fps-internal4k-v1'
-SETTINGS = dict(fps_limit='unlimited', oot_resolution='4k', vk_present='mailbox',
+UPDATE_ID = 'oot-graphics-recovery-v2'
+# Restore texture lowering after reported scene corruption. The user explicitly wants
+# the 300 FPS/4K features and their chosen FPS/resolution settings left in place.
+SETTINGS = dict(vk_present='mailbox',
                 upscaler='bilinear', sharpness='0', color_preset='default', color_brightness='0',
                 color_contrast='100', color_saturation='100', color_gamma='1', perf_overlay='fps')
 
@@ -61,13 +63,15 @@ def launcher_update(raw: bytes) -> bytes:
     text = raw.decode('utf-8-sig')
     newline = '\r\n' if '\r\n' in text else '\n'
     text = text.replace('\r\n', '\n')
-    marker = '# Ocarina graphics/fps/4k v1: safe compute fallback and authored real-time clock.'
+    marker = '# Ocarina graphics recovery v2: safe compute fallback, real-time clock, measured frame logs.'
     if marker in text:
         return raw
     anchor = '$game = Start-Process .\\ocarina.exe'
     if text.count(anchor) != 1:
         raise ValueError('지원되는 기존 실행 스크립트가 아닙니다. 설치 파일을 변경하지 않았습니다.')
-    text = text.replace(anchor, marker + "\n$env:TOTK_BIG_CS = '1'\n$env:OOT_DYN_DT = '1'\n" + anchor)
+    previous = "# Ocarina graphics/fps/4k v1: safe compute fallback and authored real-time clock.\n$env:TOTK_BIG_CS = '1'\n$env:OOT_DYN_DT = '1'\n"
+    text = text.replace(previous, '')
+    text = text.replace(anchor, marker + "\n$env:TOTK_BIG_CS = '1'\n$env:OOT_DYN_DT = '1'\n$env:TOTK_TRACE = 'perf'\n" + anchor)
     return b'\xef\xbb\xbf' + text.replace('\n', newline).encode('utf-8')
 
 
@@ -100,7 +104,8 @@ def plan(root: Path, bundle: Path) -> dict[str, bytes]:
         old = path.read_bytes() if path.exists() else None
         if old is not None and fingerprint(old) == entry['after']:
             continue
-        if (old is not None and fingerprint(old) != entry['before']) or (old is None and entry['before'] is not None):
+        accepted = [entry['before'], *entry.get('accept', [])]
+        if (old is not None and fingerprint(old) not in accepted) or (old is None and entry['before'] is not None):
             raise ValueError('지원 버전과 다른 수정이 있습니다. 덮어쓰지 않았습니다: ' + rel)
         if old is not None and b'\r\n' in old:
             data = normalized(data).replace(b'\n', b'\r\n')
@@ -166,7 +171,8 @@ def apply(root: Path, bundle: Path) -> dict:
     out = root / 'build/oot111'
     exe = out / 'ocarina.exe'
     receipt = out / 'ocarina-graphics-4k-update.json'
-    if not changes and receipt.is_file() and json.loads(receipt.read_text()).get('exe_sha256') == digest(exe):
+    installed = json.loads(receipt.read_text()) if receipt.is_file() else {}
+    if not changes and installed.get('update') == UPDATE_ID and installed.get('exe_sha256') == digest(exe):
         linked_hooks(exe)
         return dict(status='already-current', message='이 업데이트가 이미 적용되어 있습니다.', game_exe=str(exe))
     stamp = datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ') + '-' + uuid.uuid4().hex[:8]
@@ -200,10 +206,11 @@ def apply(root: Path, bundle: Path) -> dict:
             raise ValueError('실행 파일 빌드의 오카리나 실시간 처리 표시를 확인하지 못했습니다.')
         record = dict(update=UPDATE_ID, installed_at=datetime.now(timezone.utc).isoformat(), backup=str(backup),
                       exe_sha256=digest(exe), changed_files=list(changes), verified_host_symbols=sorted(hooks),
-                      settings=SETTINGS, gameplay_verified=False, actual_4k_verified=False, actual_300fps_verified=False)
+                      settings=SETTINGS, frame_settings_preserved=True,
+                      gameplay_verified=False, actual_4k_verified=False, actual_300fps_verified=False)
         atomic_bytes(receipt, json.dumps(record, ensure_ascii=False, indent=2).encode())
         return dict(status='updated', game_exe=str(exe), backup=str(backup), build_log=str(log),
-                    message='그래픽 수정·FPS 제한 해제·내부 4K 모드 빌드를 완료했습니다. 실제 게임 화면과 성능은 확인이 필요합니다.')
+                    message='이전 텍스처 셰이더를 복구했습니다. 기존 FPS·내부 4K 설정을 유지했습니다. 실제 게임 화면은 확인이 필요합니다.')
     except BaseException:
         for rel in saved:
             path = root / rel

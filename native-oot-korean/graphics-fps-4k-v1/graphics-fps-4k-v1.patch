@@ -561,7 +561,7 @@
 +        [Windows.Forms.Application]::EnableVisualStyles()
 +        if (-not $InstallRoot) {
 +            $dialog = New-Object Windows.Forms.FolderBrowserDialog
-+            $dialog.Description = '기존 OcarinaRecomp 설치 폴더를 선택하세요. 그래픽 수정, FPS 제한 해제, 내부 4K를 함께 적용합니다.'
++            $dialog.Description = '기존 OcarinaRecomp 설치 폴더를 선택하세요. 이전 텍스처 셰이더를 복구합니다. 기존 FPS와 내부 4K 설정은 유지합니다.'
 +            if (Test-Path -LiteralPath 'C:\OcarinaRecomp') { $dialog.SelectedPath = 'C:\OcarinaRecomp' }
 +            if ($dialog.ShowDialog() -ne 'OK') { $dialog.Dispose(); exit 0 }
 +            $InstallRoot = $dialog.SelectedPath
@@ -579,14 +579,14 @@
 +    $helper = Join-Path $PSScriptRoot 'update_graphics_4k.py'
 +    if (-not $SemJanela) {
 +        $progress = New-Object Windows.Forms.Form
-+        $progress.Text = '오카리나 그래픽 · FPS · 4K 업데이트 중'
++        $progress.Text = '오카리나 그래픽 복구 v2 중'
 +        $progress.ClientSize = New-Object Drawing.Size(610, 155)
 +        $progress.StartPosition = 'CenterScreen'
 +        $progress.ControlBox = $false
 +        $progress.Font = New-Object Drawing.Font('Malgun Gothic', 10)
 +        $status = New-Object Windows.Forms.Label
 +        $status.SetBounds(18, 18, 575, 120)
-+        $status.Text = "기존 실행 파일과 설정을 백업하고 그래픽·프레임·해상도 코드를 수정합니다.`n설치된 도구로 실행 파일을 다시 컴파일합니다. 몇 분 걸릴 수 있습니다.`n`n내부 4K · FPS 제한 없음 · 기본 색감으로 설정합니다. 저장 파일과 한국어는 유지됩니다."
++        $status.Text = "기존 실행 파일과 설정을 백업하고 이전 텍스처 셰이더로 복구합니다.`n설치된 도구로 실행 파일을 다시 컴파일합니다. 몇 분 걸릴 수 있습니다.`n`n기존 FPS · 내부 4K 설정과 저장 파일 · 한국어를 유지합니다."
 +        $progress.Controls.Add($status)
 +        $progress.Show(); $progress.Refresh()
 +    }
@@ -619,11 +619,11 @@
 +    if ($progress) { $progress.Close() }
 +    Write-Output $text
 +    if (-not $SemJanela) {
-+        [void][Windows.Forms.MessageBox]::Show("$($result.message)`n`n기존 게임 바로가기로 실행하세요. 재설치하거나 NUP를 다시 선택할 필요가 없습니다.`n`n실제 게임의 그래픽·4K·300FPS는 아직 검증 전입니다. 성능은 PC에 따라 달라집니다.", '오카리나 그래픽 · FPS · 4K 업데이트', 'OK', 'Information')
++        [void][Windows.Forms.MessageBox]::Show("$($result.message)`n`n기존 게임 바로가기로 실행하세요. 재설치하거나 NUP를 다시 선택할 필요가 없습니다.`n`n같은 장소에서 화면과 FPS를 확인하세요. 실제 게임에서 복구 결과 확인이 필요합니다.", '오카리나 그래픽 복구 v2', 'OK', 'Information')
 +    }
 +} catch {
 +    if ($SemJanela) { throw }
-+    [void][Windows.Forms.MessageBox]::Show($_.Exception.Message, '오카리나 그래픽 · FPS · 4K 업데이트', 'OK', 'Error')
++    [void][Windows.Forms.MessageBox]::Show($_.Exception.Message, '오카리나 그래픽 복구 v2', 'OK', 'Error')
 +    exit 1
 +} finally {
 +    if ($process) { $process.Dispose() }
@@ -640,7 +640,7 @@
 +    & (Join-Path $destination 'Ocarina-Graphics-4K/update-graphics-4k.ps1')
 +} catch {
 +    Add-Type -AssemblyName System.Windows.Forms
-+    [void][Windows.Forms.MessageBox]::Show($_.Exception.Message, '오카리나 그래픽 · FPS · 4K 업데이트', 'OK', 'Error')
++    [void][Windows.Forms.MessageBox]::Show($_.Exception.Message, '오카리나 그래픽 복구 v2', 'OK', 'Error')
 +    exit 1
 +}
 --- a/instalador/singlefile.c
@@ -704,12 +704,12 @@
          resource = folder / 'setup.res'
 +        if args.graphics_4k:
 +            manifest.write_text(manifest.read_text().replace('OcarinaRecomp.KoreanSetup', 'OcarinaRecomp.GraphicsFPS4K')
-+                                .replace('version="0.2.5.2"', 'version="0.2.6.1"'))
-+            rc.write_text(rc.read_text().replace('Ocarina Recomp Korean Native Build Setup', 'Ocarina Native Graphics FPS Internal 4K Update')
-+                          .replace('Ocarina Recomp Korean Setup', 'Ocarina Graphics FPS Internal 4K')
++                                .replace('version="0.2.5.2"', 'version="0.2.6.2"'))
++            rc.write_text(rc.read_text().replace('Ocarina Recomp Korean Native Build Setup', 'Ocarina Native Graphics Recovery v2')
++                          .replace('Ocarina Recomp Korean Setup', 'Ocarina Graphics Recovery')
 +                          .replace('Ocarina_Korean_Setup.exe', 'Ocarina_Graphics_FPS_4K_Update.exe')
-+                          .replace('0.2.5-ko2', '0.2.6-graphics4k-v1')
-+                          .replace('VERSION 0,2,5,2', 'VERSION 0,2,6,1'))
++                          .replace('0.2.5-ko2', '0.2.6-recovery-v2')
++                          .replace('VERSION 0,2,5,2', 'VERSION 0,2,6,2'))
          subprocess.run([str(args.windres), '-i', str(rc), '-o', str(resource), '-O', 'coff'], check=True)
          subprocess.run([str(args.cc), '-std=c11', '-O2', '-Wall', '-Wextra', '-Werror', '-municode', '-mwindows',
                          str(ROOT / 'instalador/singlefile.c'), str(resource), '-lole32', '-static', '-s',
@@ -723,7 +723,7 @@
  
 --- /dev/null
 +++ b/tools/oot/make_graphics_4k_update.py
-@@ -0,0 +1,89 @@
+@@ -0,0 +1,109 @@
 +#!/usr/bin/env python3
 +"""Build a game-free native EXE that updates an existing Ocarina installation locally."""
 +import argparse
@@ -746,6 +746,10 @@
 +    'tools/build_game.py', 'tools/oot/patch_generated.py',
 +]
 +HELPERS = ['update_graphics_4k.py', 'fix_ocarina_playback.py', 'patch_generated.py']
++RECOVERY_SHADERS = {
++    'runtime/third_party/eglantine/shader_recompiler/frontend/ampere/register_pressure.h',
++    'runtime/third_party/eglantine/shader_recompiler/frontend/ampere/lower_to_maxwell.h',
++}
 +SOURCE = ['instalador/update-graphics-4k.ps1', 'instalador/graphics-4k-bootstrap.ps1', 'instalador/singlefile.c',
 +          'tools/oot/package_singlefile.py', 'tools/oot/make_graphics_4k_update.py',
 +          'tests/oot_graphics_policy_test.py', 'tests/oot_graphics_update_test.py',
@@ -757,6 +761,24 @@
 +
 +def fingerprint(raw):
 +    return hashlib.sha256(raw.replace(b'\r\n', b'\n')).hexdigest()
++
++
++def payload_entries(base):
++    """Ship the previous ko2 texture lowering, accepting either ko2 or the known v1 update on disk.
++
++    The experimental backports remain in the development tree for investigation, not in this recovery payload.
++    """
++    for rel in PAYLOAD:
++        previous = (base / rel).read_bytes() if (base / rel).is_file() else None
++        experimental = (ROOT / rel).read_bytes()
++        data = previous if rel in RECOVERY_SHADERS else experimental
++        if data is None:
++            raise ValueError('Required recovery shader is missing from the ko2 baseline: ' + rel)
++        entry = dict(path=rel, before=fingerprint(previous) if previous is not None else None,
++                     after=fingerprint(data))
++        if fingerprint(experimental) != entry['after']:
++            entry['accept'] = [fingerprint(experimental)]
++        yield entry, data
 +
 +
 +def verify_bundled_helpers(archive):
@@ -785,16 +807,14 @@
 +    args = ap.parse_args()
 +    args.out.parent.mkdir(parents=True, exist_ok=True)
 +    archive = args.out.with_suffix('.zip')
-+    manifest = dict(update='oot-graphics-fps-internal4k-v1', upstream='fe7a9399a6daa5a789e7557e5a193db8f3055c2a',
++    manifest = dict(update='oot-graphics-recovery-v2', profile='previous-ko2-texture-lowering',
++                    upstream='fe7a9399a6daa5a789e7557e5a193db8f3055c2a',
 +                    lichii_reference='bf4c42e223d4812d4456d3d8f66d892571d19a13', files=[])
 +    prefix = 'Ocarina-Graphics-4K/'
 +    with zipfile.ZipFile(archive, 'w', zipfile.ZIP_DEFLATED, compresslevel=9) as bundle:
-+        for rel in PAYLOAD:
-+            data = (ROOT / rel).read_bytes()
-+            old = args.base / rel
-+            manifest['files'].append(dict(path=rel, before=fingerprint(old.read_bytes()) if old.is_file() else None,
-+                                          after=fingerprint(data)))
-+            bundle.writestr(prefix + 'payload/' + rel, data)
++        for entry, data in payload_entries(args.base):
++            manifest['files'].append(entry)
++            bundle.writestr(prefix + 'payload/' + entry['path'], data)
 +        bundle.writestr(prefix + 'manifest.json', json.dumps(manifest, indent=2))
 +        for name in HELPERS:
 +            bundle.write(ROOT / 'tools/oot' / name, prefix + name)
@@ -922,7 +942,7 @@
 +    main()
 --- /dev/null
 +++ b/tests/oot_graphics_update_test.py
-@@ -0,0 +1,127 @@
+@@ -0,0 +1,177 @@
 +"""Test real update planning, backups and rollback with authored installation/PE fixtures, no game."""
 +import json
 +import os
@@ -945,15 +965,15 @@
 +        self.bundle = Path(self.temp.name) / 'bundle'
 +        self.bundle.mkdir()
 +        base = Path(os.environ.get('OOT_KO2_BASE', ROOT.parent / 'graphics-installed-base'))
++        self.base = base
 +        # Production payload, with its real baseline guard; the caller may provide another Korean baseline.
 +        import make_graphics_4k_update as package
 +        manifest = dict(files=[])
-+        for rel in package.PAYLOAD:
++        for entry, after in package.payload_entries(base):
++            rel = entry['path']
 +            before = base / rel
-+            after = (ROOT / rel).read_bytes()
 +            self.put_bundle('payload/' + rel, after)
-+            manifest['files'].append(dict(path=rel, before=update.fingerprint(before.read_bytes()) if before.exists() else None,
-+                                          after=update.fingerprint(after)))
++            manifest['files'].append(entry)
 +            if before.exists():
 +                self.put(rel, before.read_bytes())
 +        self.put_bundle('manifest.json', json.dumps(manifest).encode())
@@ -1001,9 +1021,59 @@
 +        self.assertIn(b'lang = ko\r\n', ini)
 +        self.assertIn(b'vk_dyn_a2c=0\r\n', ini)
 +        self.assertIn(b'pad_layout=xbox\r\n', ini)
-+        self.assertIn(b'fps_limit=unlimited\r\nTOTK_FPS_LIMIT=unlimited', ini)
-+        self.assertIn(b'oot_resolution = 4k', ini)
++        self.assertIn(b'fps_limit=60\r\nTOTK_FPS_LIMIT=144', ini)
++        self.assertNotIn(b'oot_resolution', ini)
 +        self.assertEqual((Path(result['backup']) / 'build/oot111/totk.ini').read_bytes(), self.ini)
++
++    def test_user_300fps_and_4k_settings_are_preserved_byte_for_byte(self):
++        for text in (b'fps_limit=300\noot_resolution=4k\n',
++                     b'TOTK_FPS_LIMIT = 300\r\nTOTK_OOT_RESOLUTION = 4k\r\n',
++                     b'FPS_LIMIT=unlimited\nOOT_RESOLUTION=4k'):
++            after = update.config_update(text)
++            self.assertTrue(after.startswith(text), (text, after))
++            self.assertEqual(update.config_update(after), after)
++        self.assertNotIn('fps_limit', update.SETTINGS)
++        self.assertNotIn('oot_resolution', update.SETTINGS)
++
++    def v1_fixture(self):
++        import make_graphics_4k_update as package
++        for rel in package.PAYLOAD:
++            self.put(rel, (ROOT / rel).read_bytes())
++        self.put('runtime/ov_input.c', (ROOT / 'runtime/ov_input.c').read_bytes())
++        self.put('build/oot111/ocarina.exe', authored_pe(True))
++        self.put('build/oot111/totk.ini', b'lang=ko\nmenu_lang=ko\nfps_limit=unlimited\noot_resolution=4k\n')
++        launcher = (self.root / 'jogar/jogar-ocarina.ps1').read_text(encoding='utf-8-sig')
++        block = "# Ocarina graphics/fps/4k v1: safe compute fallback and authored real-time clock.\n$env:TOTK_BIG_CS = '1'\n$env:OOT_DYN_DT = '1'\n"
++        self.put('jogar/jogar-ocarina.ps1', (launcher.replace('$game = Start-Process', block + '$game = Start-Process')).encode())
++
++    def test_existing_v1_recovers_exact_previous_texture_headers(self):
++        self.v1_fixture()
++        import make_graphics_4k_update as package
++        original = {rel: (self.root / rel).read_bytes() for rel in package.RECOVERY_SHADERS}
++        with patch.object(update, 'build', side_effect=self.built):
++            result = update.apply(self.root, self.bundle)
++        for rel in package.RECOVERY_SHADERS:
++            self.assertEqual((self.root / rel).read_bytes(), (self.base / rel).read_bytes())
++            self.assertEqual((Path(result['backup']) / rel).read_bytes(), original[rel])
++        ini = (self.root / 'build/oot111/totk.ini').read_text()
++        self.assertIn('oot_resolution=4k', ini)
++        self.assertIn('fps_limit=unlimited', ini)
++        self.assertNotIn('fps_limit=60', ini)
++        launcher = (self.root / 'jogar/jogar-ocarina.ps1').read_text(encoding='utf-8-sig')
++        self.assertNotIn('# Ocarina graphics/fps/4k v1:', launcher)
++        self.assertIn("$env:TOTK_TRACE = 'perf'", launcher)
++        self.assertEqual((self.root / 'perfil/save.bin').read_bytes(), b'unchanged save')
++
++    def test_failed_v1_recovery_restores_v1_instead_of_leaving_mixed_sources(self):
++        self.v1_fixture()
++        import make_graphics_4k_update as package
++        paths = [*package.RECOVERY_SHADERS, 'build/oot111/totk.ini', 'build/oot111/ocarina.exe', 'jogar/jogar-ocarina.ps1']
++        original = {rel: (self.root / rel).read_bytes() for rel in paths}
++        with patch.object(update, 'build', side_effect=ValueError('authored build failure')):
++            with self.assertRaises(ValueError):
++                update.apply(self.root, self.bundle)
++        for rel in paths:
++            self.assertEqual((self.root / rel).read_bytes(), original[rel])
 +
 +    def test_failure_restores_source_settings_exe_and_removes_new_files(self):
 +        for failure in ('compile', 'host-table', 'metadata'):
@@ -1352,64 +1422,60 @@
  | Hookshot fixed resolution for Ocarina of Time 1.1.1: the dynamic-resolution branch (flag +0x94, fixed path and its 1.0 scale), the 30 dynamic frames before the fixed path | https://github.com/NotRexed/Hookshot @ `c02f290d47ff89d87ac444f32c0e8a39943a1c41` (`nx2/oot_patches.py`, `host/nn_vi.c`, pull request 102), NotRexed and contributors (the files carry no copyright line) | GPL-3.0 | `tools/oot/patch_generated.py` (FIXED_RES) |
 --- /dev/null
 +++ b/docs/oot-graphics-fps-4k.md
-@@ -0,0 +1,54 @@
-+# 오카리나 그래픽 · FPS · 내부 4K 업데이트 v1
+@@ -0,0 +1,50 @@
++# 오카리나 그래픽 복구 v2
 +
-+패키지 수정: 설치된 Python의 격리 실행에서도 함께 압축된 보조 파일을 찾도록 검색 경로를 수정했습니다.
-+기존 파일에서 발생한 `ModuleNotFoundError: No module named 'fix_ocarina_playback'`를 수정합니다.
++초록색 과발광·검은 영역·13FPS가 보인다는 보고에 대응하는 복구본입니다.
++원인은 사진만으로 확정되지 않았습니다. FPS와 내부 4K 설정을 그대로 둔 채 텍스처 셰이더 변경을 되돌려 비교합니다.
 +
-+게임을 종료하고 `Ocarina_Graphics_FPS_4K_Update.exe`를 실행한 뒤 **기존 OcarinaRecomp 설치 폴더**를 선택하세요.
-+`ferramentas`, `runtime`, `generated`, `build` 폴더가 들어 있는 상위 폴더입니다.
-+NUP를 다시 선택하거나 처음부터 재설치할 필요가 없습니다. 저장 파일과 한국어, 컨트롤러 설정은 유지합니다.
-+설치된 컴파일러로 런타임과 해상도 코드 한 묶음을 다시 빌드하므로 몇 분 걸릴 수 있습니다.
++게임을 종료하고 새로 받은 `Ocarina_Graphics_FPS_4K_Update.exe`를 실행한 뒤 **기존 OcarinaRecomp 설치 폴더**를 선택하세요.
++파일 이름은 같지만 창 제목과 파일 버전은 **그래픽 복구 v2 / 0.2.6-recovery-v2**입니다.
++`ferramentas`, `runtime`, `generated`, `build`가 들어 있는 폴더를 선택합니다.
++재설치하거나 NUP를 다시 선택할 필요가 없습니다.
 +
-+이 파일은 게임 실행 파일을 포함하지 않는 소스 업데이트 도구입니다. 기존 한국어 ko2 포트가 필요합니다.
-+알 수 없는 소스 수정이 있으면 덮어쓰지 않고 중단합니다.
++## 복구 내용
 +
-+## 적용 내용
++- 이번 업데이트에서 가져왔던 텍스처 미분·원자 연산 임시 레지스터 처리와 여러 텍스처 버퍼의 gather 변경을 이전 ko2 코드로 되돌립니다.
++- 300FPS 목표·제한 해제·내부 4K 기능과 현재 FPS·해상도 설정을 유지합니다.
++- 설정 파일의 fps_limit·oot_resolution 항목은 변경하거나 추가하지 않습니다.
++- 오카리나 컨트롤러 진동 조회 수정, 기존 FSEL·링크·가변 gather와 조건부 EXIT 읽기 보정은 유지합니다.
++- 저장 파일·언어·컨트롤러 매핑은 바꾸지 않습니다. 추가 색 보정은 기본값이며, 추가 선명화는 끕니다.
++- 다음 게임 실행부터 프레임 측정 로그를 남깁니다. 별도의 전송이나 업로드는 하지 않습니다.
 +
-+- 최신 리치 소스에서 텍스처 미분·원자 연산의 임시 레지스터 보존과 두 번째 텍스처 버퍼의 gather 처리를 반영합니다.
-+- 기존 포트의 링크·EXIT·FSEL·가변 gather 수정과 컨트롤러 오카리나 연주용 진동 조회 수정을 유지합니다.
-+- 셰이더를 읽을 때 EXIT의 두 조건을 모두 검사하여 조건부 종료 뒤의 코드가 잘리지 않도록 합니다.
-+- 오카리나의 기존 실시간 시간 간격 처리가 있는 빌드에서 호스트의 60Hz 프레임 대기를 해제합니다.
-+- 메뉴에 240·300 FPS와 **제한 없음**을 추가합니다. 기본 적용값은 제한 없음입니다.
-+- 내부 3D 해상도 메뉴에 **4K (3840×2160)**를 추가하고 선택합니다. 창 해상도 확대와 별개입니다.
-+- 실제 NVN 출력 텍스처 크기에 맞춰 게임 내부 렌더링 배율을 계산합니다. 초기 30프레임의 동적 해상도 초기화는 유지합니다.
-+- 추가 색 보정을 기본값으로 되돌리고, 호스트의 추가 선명화를 끕니다. 기존 검은 화면을 유발했던 Upscaler Test 경로는 안전한 대체 경로를 사용합니다.
++게임 메뉴의 300FPS·제한 없음·내부 4K 선택지는 그대로 남습니다. 실제 300FPS 성능은 확인되지 않았습니다.
++같은 장소에서 초록색·검은 영역과 FPS를 확인하세요.
 +
-+## 확인 및 변경
++## 원인 확인에 필요한 로그
 +
-+게임 메뉴의 화면 설정에서 내부 3D 해상도와 FPS 제한을 바꿀 수 있습니다.
-+4K가 무거우면 내부 해상도를 **100 %** 또는 **게임 자동 해상도**로 낮추세요.
-+프레임을 제한하려면 60·120·144·240·300 등을 선택하세요. 화면 동기화 방식은 mailbox이며, 지원하지 않는 드라이버는 VSync로 돌아갈 수 있습니다.
++복구 적용 뒤 같은 장소에서 잠시 플레이하고 게임을 종료하세요.
++설치 폴더의 **`ultima-partida-erros.log`** 파일을 보내주면 실제 렌더 타깃 크기·GPU 대기·셰이더 오류를 확인할 수 있습니다.
++로그는 자동으로 전송되지 않습니다.
 +
-+기존 진단 바로가기로 실행하면 로그에 실제 측정 FPS가 기록됩니다.
-+렌더러가 실제 3840×2160 색상·깊이 렌더 패스를 관측했을 때만 다음 줄이 출력됩니다.
-+`resolution: observed 3840x2160 color/depth render pass (internal 4K target)`
-+이는 해당 크기의 렌더 패스를 확인하는 진단이며 모든 장면·후처리의 4K 품질을 보장하는 표시는 아닙니다.
++실제 게임 화면과 성능의 복구 여부는 아직 검증 전입니다. 이 도구는 원인 확정이나 모든 그래픽 오류 해결을 뜻하지 않습니다.
 +
-+**실제 게임의 그래픽, 오카리나 연주, 내부 4K 화면과 300FPS 달성은 검증 전입니다.**
-+FPS 제한 해제는 300FPS 성능 보장을 뜻하지 않습니다. GPU·CPU·드라이버·장면 부하에 따라 달라집니다.
-+리치의 전체 렌더러나 DLSS를 이식한 빌드는 아닙니다. 고프레임 게임 로직과 4K 메모리 사용은 실험적입니다.
-+
-+## 백업
++## 백업과 실패 복구
 +
 +변경 전 실행 파일·소스·설정은 `build/oot111/graphics-4k-backup/날짜/`에 보관합니다.
-+컴파일 또는 실행 파일 연결 검사 실패 시 변경 파일과 기존 실행 파일을 자동 복원합니다.
++컴파일 또는 실행 파일 연결 검사 실패 시 시작 전 파일로 자동 복원합니다.
++이미 v1을 적용한 설치와 ko2 설치를 지원하며, 알려지지 않은 소스 변경은 덮어쓰지 않습니다.
 +빌드 로그는 `build/oot111/ocarina-graphics-4k-build.log`입니다.
 +
-+## 소스와 기준
++## 소스와 재현
 +
-+- Ocarina Recomp: https://github.com/sostenesfreitas/ocarina-recomp/tree/fe7a9399a6daa5a789e7557e5a193db8f3055c2a (0.2.6)
-+- Lichii: https://github.com/zortos293/Lichii/tree/bf4c42e223d4812d4456d3d8f66d892571d19a13
-+- 한국어 포트 및 업데이트 소스: https://github.com/jinju151203/Lichii/tree/codex/oot-korean-native/native-oot-korean
++이 EXE는 게임을 포함하지 않으며, 설치된 컴파일러와 사용자가 소유한 기존 게임으로 로컬 빌드를 만듭니다.
++`payload/`가 실제 배포 소스입니다. 개발 소스의 실험적 텍스처 변경 두 가지는 이번 payload에서 사용하지 않습니다.
++`tools/oot/make_graphics_4k_update.py --base <변경 전 ko2 소스>`가 이전 셰이더 원문과 허용할 v1 해시를 묶습니다.
++`source/`에는 대응 도구와 검증 코드, LICENSE·THIRD_PARTY_NOTICES가 있습니다.
 +
-+압축 파일의 `payload/`에는 변경 소스가, `source/`에는 업데이트 도구와 검증 코드가 있습니다.
-+원본 프로젝트와 Eglantine/Lichii 코드의 GPL-3.0-or-later 및 THIRD_PARTY_NOTICES를 따릅니다.
-+게임 데이터, 생성된 게임 C, 저장 파일과 개인 로그는 포함하지 않습니다.
++- 원본: https://github.com/sostenesfreitas/ocarina-recomp/tree/fe7a9399a6daa5a789e7557e5a193db8f3055c2a
++- 비교했던 Lichii: https://github.com/zortos293/Lichii/tree/bf4c42e223d4812d4456d3d8f66d892571d19a13
++- 한국어 포트 및 복구 소스: https://github.com/jinju151203/Lichii/tree/codex/oot-korean-native/native-oot-korean
++
++설치된 격리 Python의 보조 파일 검색 경로 수정도 포함합니다.
++게임 데이터·생성된 게임 C·저장 파일·개인 로그는 배포하지 않습니다.
 --- /dev/null
 +++ b/tools/oot/update_graphics_4k.py
-@@ -0,0 +1,233 @@
+@@ -0,0 +1,240 @@
 +#!/usr/bin/env python3
 +"""Transactional source update for an existing owned-game Ocarina native installation."""
 +from __future__ import annotations
@@ -1431,8 +1497,10 @@
 +from fix_ocarina_playback import atomic_bytes, digest, linked_hooks, patched_source, safe_file
 +from patch_generated import DYN_DT, FIXED_RES, upgrade_fixed_resolution
 +
-+UPDATE_ID = 'oot-graphics-fps-internal4k-v1'
-+SETTINGS = dict(fps_limit='unlimited', oot_resolution='4k', vk_present='mailbox',
++UPDATE_ID = 'oot-graphics-recovery-v2'
++# Restore texture lowering after reported scene corruption. The user explicitly wants
++# the 300 FPS/4K features and their chosen FPS/resolution settings left in place.
++SETTINGS = dict(vk_present='mailbox',
 +                upscaler='bilinear', sharpness='0', color_preset='default', color_brightness='0',
 +                color_contrast='100', color_saturation='100', color_gamma='1', perf_overlay='fps')
 +
@@ -1473,13 +1541,15 @@
 +    text = raw.decode('utf-8-sig')
 +    newline = '\r\n' if '\r\n' in text else '\n'
 +    text = text.replace('\r\n', '\n')
-+    marker = '# Ocarina graphics/fps/4k v1: safe compute fallback and authored real-time clock.'
++    marker = '# Ocarina graphics recovery v2: safe compute fallback, real-time clock, measured frame logs.'
 +    if marker in text:
 +        return raw
 +    anchor = '$game = Start-Process .\\ocarina.exe'
 +    if text.count(anchor) != 1:
 +        raise ValueError('지원되는 기존 실행 스크립트가 아닙니다. 설치 파일을 변경하지 않았습니다.')
-+    text = text.replace(anchor, marker + "\n$env:TOTK_BIG_CS = '1'\n$env:OOT_DYN_DT = '1'\n" + anchor)
++    previous = "# Ocarina graphics/fps/4k v1: safe compute fallback and authored real-time clock.\n$env:TOTK_BIG_CS = '1'\n$env:OOT_DYN_DT = '1'\n"
++    text = text.replace(previous, '')
++    text = text.replace(anchor, marker + "\n$env:TOTK_BIG_CS = '1'\n$env:OOT_DYN_DT = '1'\n$env:TOTK_TRACE = 'perf'\n" + anchor)
 +    return b'\xef\xbb\xbf' + text.replace('\n', newline).encode('utf-8')
 +
 +
@@ -1512,7 +1582,8 @@
 +        old = path.read_bytes() if path.exists() else None
 +        if old is not None and fingerprint(old) == entry['after']:
 +            continue
-+        if (old is not None and fingerprint(old) != entry['before']) or (old is None and entry['before'] is not None):
++        accepted = [entry['before'], *entry.get('accept', [])]
++        if (old is not None and fingerprint(old) not in accepted) or (old is None and entry['before'] is not None):
 +            raise ValueError('지원 버전과 다른 수정이 있습니다. 덮어쓰지 않았습니다: ' + rel)
 +        if old is not None and b'\r\n' in old:
 +            data = normalized(data).replace(b'\n', b'\r\n')
@@ -1578,7 +1649,8 @@
 +    out = root / 'build/oot111'
 +    exe = out / 'ocarina.exe'
 +    receipt = out / 'ocarina-graphics-4k-update.json'
-+    if not changes and receipt.is_file() and json.loads(receipt.read_text()).get('exe_sha256') == digest(exe):
++    installed = json.loads(receipt.read_text()) if receipt.is_file() else {}
++    if not changes and installed.get('update') == UPDATE_ID and installed.get('exe_sha256') == digest(exe):
 +        linked_hooks(exe)
 +        return dict(status='already-current', message='이 업데이트가 이미 적용되어 있습니다.', game_exe=str(exe))
 +    stamp = datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ') + '-' + uuid.uuid4().hex[:8]
@@ -1612,10 +1684,11 @@
 +            raise ValueError('실행 파일 빌드의 오카리나 실시간 처리 표시를 확인하지 못했습니다.')
 +        record = dict(update=UPDATE_ID, installed_at=datetime.now(timezone.utc).isoformat(), backup=str(backup),
 +                      exe_sha256=digest(exe), changed_files=list(changes), verified_host_symbols=sorted(hooks),
-+                      settings=SETTINGS, gameplay_verified=False, actual_4k_verified=False, actual_300fps_verified=False)
++                      settings=SETTINGS, frame_settings_preserved=True,
++                      gameplay_verified=False, actual_4k_verified=False, actual_300fps_verified=False)
 +        atomic_bytes(receipt, json.dumps(record, ensure_ascii=False, indent=2).encode())
 +        return dict(status='updated', game_exe=str(exe), backup=str(backup), build_log=str(log),
-+                    message='그래픽 수정·FPS 제한 해제·내부 4K 모드 빌드를 완료했습니다. 실제 게임 화면과 성능은 확인이 필요합니다.')
++                    message='이전 텍스처 셰이더를 복구했습니다. 기존 FPS·내부 4K 설정을 유지했습니다. 실제 게임 화면은 확인이 필요합니다.')
 +    except BaseException:
 +        for rel in saved:
 +            path = root / rel

@@ -15,7 +15,7 @@ try {
         [Windows.Forms.Application]::EnableVisualStyles()
         if (-not $InstallRoot) {
             $dialog = New-Object Windows.Forms.FolderBrowserDialog
-            $dialog.Description = '기존 OcarinaRecomp 설치 폴더를 선택하세요. 그래픽 수정, FPS 제한 해제, 내부 4K를 함께 적용합니다.'
+            $dialog.Description = '기존 OcarinaRecomp 설치 폴더를 선택하세요. 이전 텍스처 셰이더를 복구합니다. 기존 FPS와 내부 4K 설정은 유지합니다.'
             if (Test-Path -LiteralPath 'C:\OcarinaRecomp') { $dialog.SelectedPath = 'C:\OcarinaRecomp' }
             if ($dialog.ShowDialog() -ne 'OK') { $dialog.Dispose(); exit 0 }
             $InstallRoot = $dialog.SelectedPath
@@ -33,14 +33,14 @@ try {
     $helper = Join-Path $PSScriptRoot 'update_graphics_4k.py'
     if (-not $SemJanela) {
         $progress = New-Object Windows.Forms.Form
-        $progress.Text = '오카리나 그래픽 · FPS · 4K 업데이트 중'
+        $progress.Text = '오카리나 그래픽 복구 v2 중'
         $progress.ClientSize = New-Object Drawing.Size(610, 155)
         $progress.StartPosition = 'CenterScreen'
         $progress.ControlBox = $false
         $progress.Font = New-Object Drawing.Font('Malgun Gothic', 10)
         $status = New-Object Windows.Forms.Label
         $status.SetBounds(18, 18, 575, 120)
-        $status.Text = "기존 실행 파일과 설정을 백업하고 그래픽·프레임·해상도 코드를 수정합니다.`n설치된 도구로 실행 파일을 다시 컴파일합니다. 몇 분 걸릴 수 있습니다.`n`n내부 4K · FPS 제한 없음 · 기본 색감으로 설정합니다. 저장 파일과 한국어는 유지됩니다."
+        $status.Text = "기존 실행 파일과 설정을 백업하고 이전 텍스처 셰이더로 복구합니다.`n설치된 도구로 실행 파일을 다시 컴파일합니다. 몇 분 걸릴 수 있습니다.`n`n기존 FPS · 내부 4K 설정과 저장 파일 · 한국어를 유지합니다."
         $progress.Controls.Add($status)
         $progress.Show(); $progress.Refresh()
     }
@@ -73,11 +73,11 @@ try {
     if ($progress) { $progress.Close() }
     Write-Output $text
     if (-not $SemJanela) {
-        [void][Windows.Forms.MessageBox]::Show("$($result.message)`n`n기존 게임 바로가기로 실행하세요. 재설치하거나 NUP를 다시 선택할 필요가 없습니다.`n`n실제 게임의 그래픽·4K·300FPS는 아직 검증 전입니다. 성능은 PC에 따라 달라집니다.", '오카리나 그래픽 · FPS · 4K 업데이트', 'OK', 'Information')
+        [void][Windows.Forms.MessageBox]::Show("$($result.message)`n`n기존 게임 바로가기로 실행하세요. 재설치하거나 NUP를 다시 선택할 필요가 없습니다.`n`n같은 장소에서 화면과 FPS를 확인하세요. 실제 게임에서 복구 결과 확인이 필요합니다.", '오카리나 그래픽 복구 v2', 'OK', 'Information')
     }
 } catch {
     if ($SemJanela) { throw }
-    [void][Windows.Forms.MessageBox]::Show($_.Exception.Message, '오카리나 그래픽 · FPS · 4K 업데이트', 'OK', 'Error')
+    [void][Windows.Forms.MessageBox]::Show($_.Exception.Message, '오카리나 그래픽 복구 v2', 'OK', 'Error')
     exit 1
 } finally {
     if ($process) { $process.Dispose() }

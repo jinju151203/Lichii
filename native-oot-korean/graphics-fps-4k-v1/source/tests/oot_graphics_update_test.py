@@ -20,15 +20,15 @@ class GraphicsUpdateTests(unittest.TestCase):
         self.bundle = Path(self.temp.name) / 'bundle'
         self.bundle.mkdir()
         base = Path(os.environ.get('OOT_KO2_BASE', ROOT.parent / 'graphics-installed-base'))
+        self.base = base
         # Production payload, with its real baseline guard; the caller may provide another Korean baseline.
         import make_graphics_4k_update as package
         manifest = dict(files=[])
-        for rel in package.PAYLOAD:
+        for entry, after in package.payload_entries(base):
+            rel = entry['path']
             before = base / rel
-            after = (ROOT / rel).read_bytes()
             self.put_bundle('payload/' + rel, after)
-            manifest['files'].append(dict(path=rel, before=update.fingerprint(before.read_bytes()) if before.exists() else None,
-                                          after=update.fingerprint(after)))
+            manifest['files'].append(entry)
             if before.exists():
                 self.put(rel, before.read_bytes())
         self.put_bundle('manifest.json', json.dumps(manifest).encode())
@@ -76,9 +76,59 @@ class GraphicsUpdateTests(unittest.TestCase):
         self.assertIn(b'lang = ko\r\n', ini)
         self.assertIn(b'vk_dyn_a2c=0\r\n', ini)
         self.assertIn(b'pad_layout=xbox\r\n', ini)
-        self.assertIn(b'fps_limit=unlimited\r\nTOTK_FPS_LIMIT=unlimited', ini)
-        self.assertIn(b'oot_resolution = 4k', ini)
+        self.assertIn(b'fps_limit=60\r\nTOTK_FPS_LIMIT=144', ini)
+        self.assertNotIn(b'oot_resolution', ini)
         self.assertEqual((Path(result['backup']) / 'build/oot111/totk.ini').read_bytes(), self.ini)
+
+    def test_user_300fps_and_4k_settings_are_preserved_byte_for_byte(self):
+        for text in (b'fps_limit=300\noot_resolution=4k\n',
+                     b'TOTK_FPS_LIMIT = 300\r\nTOTK_OOT_RESOLUTION = 4k\r\n',
+                     b'FPS_LIMIT=unlimited\nOOT_RESOLUTION=4k'):
+            after = update.config_update(text)
+            self.assertTrue(after.startswith(text), (text, after))
+            self.assertEqual(update.config_update(after), after)
+        self.assertNotIn('fps_limit', update.SETTINGS)
+        self.assertNotIn('oot_resolution', update.SETTINGS)
+
+    def v1_fixture(self):
+        import make_graphics_4k_update as package
+        for rel in package.PAYLOAD:
+            self.put(rel, (ROOT / rel).read_bytes())
+        self.put('runtime/ov_input.c', (ROOT / 'runtime/ov_input.c').read_bytes())
+        self.put('build/oot111/ocarina.exe', authored_pe(True))
+        self.put('build/oot111/totk.ini', b'lang=ko\nmenu_lang=ko\nfps_limit=unlimited\noot_resolution=4k\n')
+        launcher = (self.root / 'jogar/jogar-ocarina.ps1').read_text(encoding='utf-8-sig')
+        block = "# Ocarina graphics/fps/4k v1: safe compute fallback and authored real-time clock.\n$env:TOTK_BIG_CS = '1'\n$env:OOT_DYN_DT = '1'\n"
+        self.put('jogar/jogar-ocarina.ps1', (launcher.replace('$game = Start-Process', block + '$game = Start-Process')).encode())
+
+    def test_existing_v1_recovers_exact_previous_texture_headers(self):
+        self.v1_fixture()
+        import make_graphics_4k_update as package
+        original = {rel: (self.root / rel).read_bytes() for rel in package.RECOVERY_SHADERS}
+        with patch.object(update, 'build', side_effect=self.built):
+            result = update.apply(self.root, self.bundle)
+        for rel in package.RECOVERY_SHADERS:
+            self.assertEqual((self.root / rel).read_bytes(), (self.base / rel).read_bytes())
+            self.assertEqual((Path(result['backup']) / rel).read_bytes(), original[rel])
+        ini = (self.root / 'build/oot111/totk.ini').read_text()
+        self.assertIn('oot_resolution=4k', ini)
+        self.assertIn('fps_limit=unlimited', ini)
+        self.assertNotIn('fps_limit=60', ini)
+        launcher = (self.root / 'jogar/jogar-ocarina.ps1').read_text(encoding='utf-8-sig')
+        self.assertNotIn('# Ocarina graphics/fps/4k v1:', launcher)
+        self.assertIn("$env:TOTK_TRACE = 'perf'", launcher)
+        self.assertEqual((self.root / 'perfil/save.bin').read_bytes(), b'unchanged save')
+
+    def test_failed_v1_recovery_restores_v1_instead_of_leaving_mixed_sources(self):
+        self.v1_fixture()
+        import make_graphics_4k_update as package
+        paths = [*package.RECOVERY_SHADERS, 'build/oot111/totk.ini', 'build/oot111/ocarina.exe', 'jogar/jogar-ocarina.ps1']
+        original = {rel: (self.root / rel).read_bytes() for rel in paths}
+        with patch.object(update, 'build', side_effect=ValueError('authored build failure')):
+            with self.assertRaises(ValueError):
+                update.apply(self.root, self.bundle)
+        for rel in paths:
+            self.assertEqual((self.root / rel).read_bytes(), original[rel])
 
     def test_failure_restores_source_settings_exe_and_removes_new_files(self):
         for failure in ('compile', 'host-table', 'metadata'):

@@ -1,5 +1,6 @@
 {
-  "update": "oot-graphics-fps-internal4k-v1",
+  "update": "oot-graphics-recovery-v2",
+  "profile": "previous-ko2-texture-lowering",
   "upstream": "fe7a9399a6daa5a789e7557e5a193db8f3055c2a",
   "lichii_reference": "bf4c42e223d4812d4456d3d8f66d892571d19a13",
   "files": [
@@ -56,12 +57,18 @@
     {
       "path": "runtime/third_party/eglantine/shader_recompiler/frontend/ampere/register_pressure.h",
       "before": "33649b05e7de4e0bfb8bddce3ae93dad805a6c3d12689984517f7263c37518e1",
-      "after": "39a599923dac9551b1316ab4f73963bfd1d5fdcdf8e4ca32be5fbd78a24433a2"
+      "after": "33649b05e7de4e0bfb8bddce3ae93dad805a6c3d12689984517f7263c37518e1",
+      "accept": [
+        "39a599923dac9551b1316ab4f73963bfd1d5fdcdf8e4ca32be5fbd78a24433a2"
+      ]
     },
     {
       "path": "runtime/third_party/eglantine/shader_recompiler/frontend/ampere/lower_to_maxwell.h",
       "before": "2d5124c0f739b43c61f9cc3a85f03d01e17caca83a0b2ea6965d8cc6528148f6",
-      "after": "4a916b5c0877d1fe6c25de27f20b7522f4244f9ff57e06037a998db44e5d0606"
+      "after": "2d5124c0f739b43c61f9cc3a85f03d01e17caca83a0b2ea6965d8cc6528148f6",
+      "accept": [
+        "4a916b5c0877d1fe6c25de27f20b7522f4244f9ff57e06037a998db44e5d0606"
+      ]
     },
     {
       "path": "runtime/third_party/eglantine/shader_recompiler/frontend/ampere/program_capture.h",

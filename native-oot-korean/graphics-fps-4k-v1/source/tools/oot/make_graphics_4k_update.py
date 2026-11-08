@@ -20,6 +20,10 @@ PAYLOAD = [
     'tools/build_game.py', 'tools/oot/patch_generated.py',
 ]
 HELPERS = ['update_graphics_4k.py', 'fix_ocarina_playback.py', 'patch_generated.py']
+RECOVERY_SHADERS = {
+    'runtime/third_party/eglantine/shader_recompiler/frontend/ampere/register_pressure.h',
+    'runtime/third_party/eglantine/shader_recompiler/frontend/ampere/lower_to_maxwell.h',
+}
 SOURCE = ['instalador/update-graphics-4k.ps1', 'instalador/graphics-4k-bootstrap.ps1', 'instalador/singlefile.c',
           'tools/oot/package_singlefile.py', 'tools/oot/make_graphics_4k_update.py',
           'tests/oot_graphics_policy_test.py', 'tests/oot_graphics_update_test.py',
@@ -31,6 +35,24 @@ SOURCE = ['instalador/update-graphics-4k.ps1', 'instalador/graphics-4k-bootstrap
 
 def fingerprint(raw):
     return hashlib.sha256(raw.replace(b'\r\n', b'\n')).hexdigest()
+
+
+def payload_entries(base):
+    """Ship the previous ko2 texture lowering, accepting either ko2 or the known v1 update on disk.
+
+    The experimental backports remain in the development tree for investigation, not in this recovery payload.
+    """
+    for rel in PAYLOAD:
+        previous = (base / rel).read_bytes() if (base / rel).is_file() else None
+        experimental = (ROOT / rel).read_bytes()
+        data = previous if rel in RECOVERY_SHADERS else experimental
+        if data is None:
+            raise ValueError('Required recovery shader is missing from the ko2 baseline: ' + rel)
+        entry = dict(path=rel, before=fingerprint(previous) if previous is not None else None,
+                     after=fingerprint(data))
+        if fingerprint(experimental) != entry['after']:
+            entry['accept'] = [fingerprint(experimental)]
+        yield entry, data
 
 
 def verify_bundled_helpers(archive):
@@ -59,16 +81,14 @@ def main():
     args = ap.parse_args()
     args.out.parent.mkdir(parents=True, exist_ok=True)
     archive = args.out.with_suffix('.zip')
-    manifest = dict(update='oot-graphics-fps-internal4k-v1', upstream='fe7a9399a6daa5a789e7557e5a193db8f3055c2a',
+    manifest = dict(update='oot-graphics-recovery-v2', profile='previous-ko2-texture-lowering',
+                    upstream='fe7a9399a6daa5a789e7557e5a193db8f3055c2a',
                     lichii_reference='bf4c42e223d4812d4456d3d8f66d892571d19a13', files=[])
     prefix = 'Ocarina-Graphics-4K/'
     with zipfile.ZipFile(archive, 'w', zipfile.ZIP_DEFLATED, compresslevel=9) as bundle:
-        for rel in PAYLOAD:
-            data = (ROOT / rel).read_bytes()
-            old = args.base / rel
-            manifest['files'].append(dict(path=rel, before=fingerprint(old.read_bytes()) if old.is_file() else None,
-                                          after=fingerprint(data)))
-            bundle.writestr(prefix + 'payload/' + rel, data)
+        for entry, data in payload_entries(args.base):
+            manifest['files'].append(entry)
+            bundle.writestr(prefix + 'payload/' + entry['path'], data)
         bundle.writestr(prefix + 'manifest.json', json.dumps(manifest, indent=2))
         for name in HELPERS:
             bundle.write(ROOT / 'tools/oot' / name, prefix + name)
