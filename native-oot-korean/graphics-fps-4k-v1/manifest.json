@@ -1,0 +1,82 @@
+{
+  "update": "oot-graphics-fps-internal4k-v1",
+  "upstream": "fe7a9399a6daa5a789e7557e5a193db8f3055c2a",
+  "lichii_reference": "bf4c42e223d4812d4456d3d8f66d892571d19a13",
+  "files": [
+    {
+      "path": "runtime/frame_rate.c",
+      "before": "c4b1da8dccab6d82f7a7989a5af2197946447053febe928c82906fc88c43dae0",
+      "after": "08cea3436125b402f5e6273a78d13e5c03d7f58a8f38702663d3c5a903311fc0"
+    },
+    {
+      "path": "runtime/oot_render_policy.c",
+      "before": null,
+      "after": "33c3e97cdb99cd14e0bea79d37e290a652edcf8596fcda54204e4985da8aee8c"
+    },
+    {
+      "path": "runtime/oot_render_policy.h",
+      "before": null,
+      "after": "367d3f4b31d3f2b0fd7a54970be111656f7fef838bc63599841712945d3b81a9"
+    },
+    {
+      "path": "runtime/nvn_api_obj.c",
+      "before": "1ed1dd826f903b6f14186bb257fd962e84f8f8cda9c7234bc2525f5f3775cd77",
+      "after": "da10e7b03c29e75219d7249c7318612e4cbe7a76c75268948c26b80bf42e4a1a"
+    },
+    {
+      "path": "runtime/vk_exec_draw.c",
+      "before": "d4c6e121c079a3be4d843d83426f3bc1971f226bc46891d1b3e21cef790243f1",
+      "after": "bcdcd8336427dfdb062369b8145008d56313f5b7b715552660316e43d13ec489"
+    },
+    {
+      "path": "runtime/cfg.c",
+      "before": "ca5b24b091458e2c58e6e63a394a6d01026b3dd156c7ff3a47833bfae054529c",
+      "after": "b9c5255404cbd491fa83b3ef06c6f3b85dec6f97588f99b6f6389f9a89d10670"
+    },
+    {
+      "path": "runtime/ui/menu.cpp",
+      "before": "57c8c0a91938b77d4518062f6bab628bae74e389150a39890b7ecd7f8c88b6a4",
+      "after": "6adcf6aec26d024c16cc63ef1edf6c34ef8914bc878158532193dcac3263af44"
+    },
+    {
+      "path": "runtime/ui_text.h",
+      "before": "b27959c72fca2f65fd3f18900b07e3e33b52732f485b26b323c7582a7b3ae32c",
+      "after": "0c9a066f5a33a965482ec34817504033efe97cdbbcefce3e4a25cff706f80f99"
+    },
+    {
+      "path": "runtime/ui_text.c",
+      "before": "45b40973f901508db8a205387ec20f2bfdc4dc2379e825134508ad4b116d5e8f",
+      "after": "a1b8b335d02c8828f37d86aa3f4ac64634c11c9b26e409bf91365fb9d5236aed"
+    },
+    {
+      "path": "runtime/ui_text_ko.inc",
+      "before": "16ce869c8d3ced4e3a4a4bf59a96734b73c2577ae7ac05a3f270275da241c015",
+      "after": "fefaabc0189d96f89f6668c8fcd632e4af0d8c84e2f85ea8dad7ad4681ab1118"
+    },
+    {
+      "path": "runtime/third_party/eglantine/shader_recompiler/frontend/ampere/register_pressure.h",
+      "before": "33649b05e7de4e0bfb8bddce3ae93dad805a6c3d12689984517f7263c37518e1",
+      "after": "39a599923dac9551b1316ab4f73963bfd1d5fdcdf8e4ca32be5fbd78a24433a2"
+    },
+    {
+      "path": "runtime/third_party/eglantine/shader_recompiler/frontend/ampere/lower_to_maxwell.h",
+      "before": "2d5124c0f739b43c61f9cc3a85f03d01e17caca83a0b2ea6965d8cc6528148f6",
+      "after": "4a916b5c0877d1fe6c25de27f20b7522f4244f9ff57e06037a998db44e5d0606"
+    },
+    {
+      "path": "runtime/third_party/eglantine/shader_recompiler/frontend/ampere/program_capture.h",
+      "before": "36487cc7ced31d09234c0788726d93a710bb191d58cf16420a79884324766aec",
+      "after": "d5b999b5dd6c85ab57632c767242778ae38df8afe6919c7d5f7ba40fe6ca80ef"
+    },
+    {
+      "path": "tools/build_game.py",
+      "before": "f0c779b3dd9665f41fc5839ca11f3d9e6c958d4791ba905b9baaf7ed34e24634",
+      "after": "e10100699c2e2499ed8cdaf4bf1d0abf36347c805405c72a056051c332c471ee"
+    },
+    {
+      "path": "tools/oot/patch_generated.py",
+      "before": "61c5033b900c0b3d429869753f959207d3cb82e6ec6df48e1ef1a06c7462b118",
+      "after": "37c06855e80b63ef9cd8cf2a8755032f8ea9ac634ac8e92229c4cca8b788dd7a"
+    }
+  ]
+}

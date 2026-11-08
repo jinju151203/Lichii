@@ -1,0 +1,1831 @@
+--- a/runtime/frame_rate.c
++++ b/runtime/frame_rate.c
+@@ -42,6 +42,7 @@
+ #include "host.h"
+ #include "layout.h"
+ #include "platform/platform.h"
++#include "oot_render_policy.h"
+ 
+ #define STEP_SAMPLES 5
+ #define STEP_MAX_S (1.0 / 15.0)    // longest step; a longer frame slows the game down
+@@ -71,6 +72,11 @@
+ void frame_step_init(void) {
+     int fps60 = rt_patch_set("fps60"), realtime = rt_patch_set("realtime"), cloth = rt_patch_set("cloth");
+     if (realtime < 0) {
++        if (oot_realtime_clock()) {
++            frame_limit_live();
++            rt_log("frame rate: Ocarina authored real-time clock; present pacing follows FPS_LIMIT");
++            return;
++        }
+         rt_log("frame rate: no patch table, shipping 30 fps whole-vsync steps");
+         return;
+     }
+@@ -88,7 +94,7 @@
+            step_word ? "real-time step (5-frame average of display intervals, at most 1/15 s)" : "whole-vsync steps");
+ }
+ 
+-int frame_step_realtime(void) { return step_word != NULL; }
++int frame_step_realtime(void) { return step_word != NULL || oot_realtime_clock(); }
+ 
+ // The frame limit (menu, TOTK_FPS_LIMIT, live): 30, 60, 90, 120, 144, any whole rate from 30 to 360, or display (the
+ // refresh rate of the window's monitor). Unset, the older TOTK_FPS60=0 still means 30. A limit of 30 switches the set
+@@ -101,16 +107,17 @@
+ static int fps60_set = -2;
+ static unsigned limit_seen;
+ static int limit_read;
+-static int limit_hz = -1;   // 0: display; -1 before the first read
++static int limit_hz = -2;   // -2: unread; -1: unlimited; 0: display
+ 
+ static int limit_parse(void) {
+     const char *e = cfg_get("TOTK_FPS_LIMIT"), *old = cfg_get("TOTK_FPS60");
+     if (!e || !*e) return old && !strcmp(old, "0") ? 30 : 60;
+     if (!strcmp(e, "display")) return 0;
++    if (!strcmp(e, "unlimited")) return -1;
+     char *end;
+     long n = strtol(e, &end, 10);
+     if (!*end && n >= LIMIT_MIN_HZ && n <= LIMIT_MAX_HZ) return (int)n;
+-    rt_log("frame rate: TOTK_FPS_LIMIT=%s is not 30..360 or display; 60", e);
++    rt_log("frame rate: TOTK_FPS_LIMIT=%s is not 30..360, display or unlimited; 60", e);
+     return 60;
+ }
+ 
+@@ -124,8 +131,9 @@
+     limit_hz = hz;
+     if (fps60_set == -2) fps60_set = rt_patch_set("fps60");
+     if (fps60_set >= 0) rt_patch_switch(fps60_set, hz != 30);
+-    if ((hz > 60 || hz == 0) && !step_word)
++    if ((hz > 60 || hz <= 0) && !frame_step_realtime())
+         rt_log("frame rate: limits above 60 need the real-time step (TOTK_REALTIME=1); 60 fps");
++    else if (hz == -1) rt_log("frame rate: unlimited host pacing (actual FPS depends on CPU/GPU and presentation)");
+     else if (hz) rt_log("frame rate: limit %d fps", hz);
+     else if (gfx_window_refresh_hz() > 0) rt_log("frame rate: limit at the monitor's refresh rate (%.3f Hz now)", gfx_window_refresh_hz());
+     else rt_log("frame rate: limit at the monitor's refresh rate (60 until the window measures it)");
+@@ -133,6 +141,7 @@
+ 
+ uint64_t frame_step_cap_ns(void) {
+     frame_limit_live();
++    if (limit_hz == -1 && frame_step_realtime()) return 0;
+     double hz = limit_hz ? limit_hz : gfx_window_refresh_hz();
+     if (hz < LIMIT_MIN_HZ) hz = 60;   // display rate unknown (no window yet)
+     if (hz > LIMIT_MAX_HZ) hz = LIMIT_MAX_HZ;
+@@ -143,10 +152,11 @@
+ // most without the real-time step; 0 before the first frame read the setting.
+ double frame_step_limit_hz(void) {
+     int hz = limit_hz;
+-    if (hz < 0) return 0;
++    if (hz == -2) return 0;
++    if (hz == -1) return frame_step_realtime() ? 0 : 60;
+     double r = hz ? hz : gfx_window_refresh_hz();
+     if (r < LIMIT_MIN_HZ) r = 60;
+-    return !step_word && r > 60 ? 60 : r > LIMIT_MAX_HZ ? LIMIT_MAX_HZ : r;
++    return !frame_step_realtime() && r > 60 ? 60 : r > LIMIT_MAX_HZ ? LIMIT_MAX_HZ : r;
+ }
+ 
+ // ---- TOTK_TRACE=perf speed lines
+@@ -200,7 +210,7 @@
+     double wall = (double)(now - win_t0) * 1e-9;
+     char pos[160] = "";
+     float p[3];
+-    if (probe && player_pos(p)) {
++    if (probe && rt_game_version && player_pos(p)) {
+         double d = last_pos_ns ? hypot(p[0] - last_pos[0], p[2] - last_pos[2]) : 0,
+                s = last_pos_ns ? (double)(now - last_pos_ns) * 1e-9 : 0;
+         snprintf(pos, sizeof pos, "; player %.1f %.1f %.1f, %.2f m in %.3f s = %.2f m/s", p[0], p[1], p[2], d, s,
+@@ -212,6 +222,9 @@
+         rt_log("fps: %llu frames in %.3f s (%.1f fps), %.3f s game stepped, speed %.3f; interval 1/2/3+ %llu/%llu/%llu%s",
+                (unsigned long long)win_frames, wall, (double)win_frames / wall, win_game, win_game / wall,
+                (unsigned long long)win_hist[1], (unsigned long long)win_hist[2], (unsigned long long)win_hist[3], pos);
++    else if (oot_realtime_clock())
++        rt_log("fps: %llu frames in %.3f s (%.1f fps), Ocarina real-time hook; game speed not surveyed",
++               (unsigned long long)win_frames, wall, (double)win_frames / wall);
+     else
+         rt_log("fps: %llu frames in %.3f s (%.1f fps), whole-vsync steps; interval 1/2/3+ %llu/%llu/%llu%s",
+                (unsigned long long)win_frames, wall, (double)win_frames / wall, (unsigned long long)win_hist[1],
+@@ -267,7 +280,8 @@
+     last_ns = display_ns;
+     // The game clock of untimed script lines: what the game stepped this frame, the patch page's step with the
+     // real-time step (kept through a reset), whole vsyncs without it.
+-    double game = step_word ? step_now : (interval > 0 ? interval : 1) / 60.0;
++    double game = step_word ? step_now : oot_realtime_clock() ? (dt > 0.1 ? 0.1 : dt) :
++                  (interval > 0 ? interval : 1) / 60.0;
+     atomic_store_explicit(&game_us, atomic_load_explicit(&game_us, memory_order_relaxed) + (uint64_t)(game * 1e6 + 0.5),
+                           memory_order_relaxed);
+     world_clock(dt, step);
+--- /dev/null
++++ b/runtime/oot_render_policy.c
+@@ -0,0 +1,33 @@
++// Ocarina's existing authored fixed-resolution hook uses a fraction of its output.
++// Derive that fraction from the actual presented NVN texture, never the desktop/window size.
++#include <stdatomic.h>
++#include <stdint.h>
++#include <stdlib.h>
++#include "oot_render_policy.h"
++extern const int rt_oot_clock; // installer-owned modules.c; 1 only with the authored game-clock hook
++extern void rt_log(const char *, ...);
++static _Atomic uint64_t output_size;
++static _Atomic int scene_4k_seen;
++
++int oot_realtime_clock(void) {
++    const char *off = getenv("OOT_DYN_DT");
++    return rt_oot_clock && !(off && *off == '0');
++}
++
++void oot_note_output(uint32_t width, uint32_t height) {
++    if (!rt_oot_clock || !width || !height) return;
++    atomic_store_explicit(&output_size, (uint64_t)width << 32 | height, memory_order_relaxed);
++}
++
++float oot_internal_4k_scale(void) {
++    uint64_t size = atomic_load_explicit(&output_size, memory_order_relaxed);
++    uint32_t w = (uint32_t)(size >> 32), h = (uint32_t)size;
++    // Do not enter the fixed path before a real, supported output has been observed.
++    if (w < 960 || w > 7680 || h < 540 || h > 4320 || (uint64_t)w * 9 != (uint64_t)h * 16) return 0;
++    return 3840.0f / (float)w;
++}
++
++void oot_note_scene(uint32_t width, uint32_t height) {
++    if (rt_oot_clock && width == 3840 && height == 2160 && !atomic_exchange(&scene_4k_seen, 1))
++        rt_log("resolution: observed 3840x2160 color/depth render pass (internal 4K target)");
++}
+--- /dev/null
++++ b/runtime/oot_render_policy.h
+@@ -0,0 +1,7 @@
++// Authored Ocarina render policy. No game addresses or game code.
++#pragma once
++#include <stdint.h>
++int oot_realtime_clock(void);
++void oot_note_output(uint32_t width, uint32_t height);
++float oot_internal_4k_scale(void);
++void oot_note_scene(uint32_t width, uint32_t height);
+--- a/runtime/nvn_api_obj.c
++++ b/runtime/nvn_api_obj.c
+@@ -790,6 +790,8 @@
+         rt_fatal("nvn: QueuePresentTexture of image %d on window %p", idx, (void *)o);
+     o->presents++;
+     const tex_t *t = (const tex_t *)o->tex[idx];
++    extern void oot_note_output(uint32_t, uint32_t);
++    oot_note_output(t->d.width, t->d.height);
+     uint64_t period = present_period(o), now = kern_now_ns();
+     uint64_t slot = now + pace(&o->pace, now, period);
+     gfx_backend()->present(t, o->crop, slot);
+--- a/runtime/vk_exec_draw.c
++++ b/runtime/vk_exec_draw.c
+@@ -2894,6 +2894,10 @@
+     }
+     if (!ex->in_pass) ex->dirty |= VK_EXEC_DIRTY_VIEWPORT | VK_EXEC_DIRTY_SCISSOR;
+     vk_exec_pass_begin(ex);
++    if (ex->pass_depth != VK_FORMAT_UNDEFINED && ex->pass_color[0] != VK_FORMAT_UNDEFINED) {
++        extern void oot_note_scene(uint32_t, uint32_t);
++        oot_note_scene(ex->pass_w, ex->pass_h);
++    }
+     VkRect2D sc = vk_exec_scissor(ex);
+     if (!sc.extent.width || !sc.extent.height) { if (draw_is_mesh) draw_why(ex, "empty scissor"); return 0; }
+     if (!ex->prog) return warn_once(W_PROGRAM, "a draw without a bound program is skipped"), 0;
+--- a/runtime/cfg.c
++++ b/runtime/cfg.c
+@@ -99,7 +99,7 @@
+     {"VK_PRESENT", "mailbox", "mailbox|fifo|immediate", LIVE}, {"GPU_INDEX", "", NULL, RESTART},
+     {"PERF_OVERLAY", "off", "off|fps|full", LIVE},
+     {"OUTPUT_RES", "1920x1080", NULL, RESTART}, {"RENDER_SCALE", "game", "game|50|67|75|100|125|150|200", RESTART},
+-    {"OOT_RESOLUTION", "auto", "auto|50|67|75|100", LIVE},   // Ocarina: tools/oot/patch_generated.py FIXED_RES
++    {"OOT_RESOLUTION", "auto", "auto|50|67|75|100|4k", LIVE},   // Ocarina: tools/oot/patch_generated.py FIXED_RES
+     {"UPSCALER", "fsr", "fsr|bilinear", LIVE}, {"SHARPNESS", "80", "0..100", LIVE},
+     {"ASPECT", "fit", "fit|stretch", LIVE}, {"FOV", "100", "70..140", LIVE},
+     // colour adjustment (vk_color.c); the preset is the menu's, the four values are what the present uses
+@@ -108,7 +108,7 @@
+     {"COLOR_GAMMA", "1", "0.8..1.2", LIVE},
+     {"DEVICE_PROFILE", "auto", "auto|desktop|deck", RESTART},
+     // Game
+-    {"FPS_LIMIT", "60", "30|40|45|60|90|120|144|display", LIVE}, {"FPS60", "1", "0|1", LIVE},
++    {"FPS_LIMIT", "60", "30|40|45|60|90|120|144|240|300|unlimited|display", LIVE}, {"FPS60", "1", "0|1", LIVE},
+     {"REALTIME", "1", "0|1", RESTART}, {"CLOTH_REALTIME", "1", "0|1", RESTART},
+     {"HIGHFPS_FIX", "1", "0|1", RESTART},
+     {"LANG", "", "ja|en-US|fr|de|it|es|zh-CN|ko|nl|pt|ru|zh-TW|en-GB|fr-CA|es-419|zh-Hans|zh-Hant|pt-BR", RESTART},
+--- a/runtime/ui/menu.cpp
++++ b/runtime/ui/menu.cpp
+@@ -50,6 +50,7 @@
+ void res_sizes(unsigned out[2], unsigned scene[2]);
+ double frame_step_limit_hz(void);
+ extern const int rt_game_version;
++extern const int rt_oot_clock;
+ // fs.h (romfs.c): romfs-patches-xbox was next to romfs-index.bin at start, and was loaded.
+ int romfs_xbox_prompts_ready(void);
+ int romfs_xbox_prompts_active(void);
+@@ -529,6 +530,12 @@
+     opt_choice_list("TOTK_RENDER_SCALE", UI_MENU_RENDER_SCALE, vals, names, N, UI_MENU_RENDER_SCALE_DESC);
+ }
+ 
++static void row_oot_res(void) {
++    static const char *const vals[] = {"auto", "50", "67", "75", "100", "4k"};
++    const char *names[] = {menu_text(UI_MENU_OOT_RES_AUTO), "50 %", "67 %", "75 %", "100 %", "4K (3840 x 2160)"};
++    opt_choice_list("TOTK_OOT_RESOLUTION", UI_MENU_OOT_RES, vals, names, 6, UI_MENU_OOT_RES_DESC);
++}
++
+ static void row_gpu(void) {
+     const char *vals[MAX_GPUS + 1], *names[MAX_GPUS + 1];
+     char idx[MAX_GPUS][4];
+@@ -568,9 +575,10 @@
+ // The frame limit (frame_rate.c): unset, the older fps60 = 0 still means 30. The monitor choice shows the rate it gives.
+ static void row_fps_limit() {
+     // 40 and 45: the Steam Deck's screen runs at 40 to 60 Hz (the OLED to 90); 40 divides 40 and 120 Hz evenly
+-    static const char *const vals[] = {"30", "40", "45", "60", "90", "120", "144", "display"};
++    static const char *const vals[] = {"30", "40", "45", "60", "90", "120", "144", "240", "300", "unlimited", "display"};
+     static const UiTextId ids[] = {UI_MENU_FPS_30, UI_MENU_FPS_40,  UI_MENU_FPS_45,  UI_MENU_FPS_60,
+-                                   UI_MENU_FPS_90, UI_MENU_FPS_120, UI_MENU_FPS_144, UI_MENU_FPS_DISPLAY};
++                                   UI_MENU_FPS_90, UI_MENU_FPS_120, UI_MENU_FPS_144, UI_MENU_FPS_240,
++                                   UI_MENU_FPS_300, UI_MENU_FPS_UNLIMITED, UI_MENU_FPS_DISPLAY};
+     enum { N = sizeof vals / sizeof *vals };
+     const char *names[N];
+     for (int i = 0; i < N; i++) names[i] = menu_text(ids[i]);
+@@ -645,8 +653,8 @@
+     static const UiTextId perf[] = {UI_MENU_PERF_OFF, UI_MENU_PERF_FPS, UI_MENU_PERF_FULL};
+     opt_choice("TOTK_PERF_OVERLAY", UI_MENU_PERF_OVERLAY, perf, 3, UI_MENU_PERF_OVERLAY_DESC);
+     opt_group(UI_MENU_GRAPHICS);
+-    row_output_res();
+-    row_render_scale();
++    if (rt_oot_clock) row_oot_res();
++    else { row_output_res(); row_render_scale(); }
+     static const UiTextId up[] = {UI_MENU_UPSCALER_FSR, UI_MENU_UPSCALER_BILINEAR};
+     opt_choice("TOTK_UPSCALER", UI_MENU_UPSCALER, up, 2, UI_MENU_UPSCALER_DESC);
+     opt_slider("TOTK_SHARPNESS", UI_MENU_SHARPNESS, 0, 100, UI_MENU_SHARPNESS_DESC, 5, "%.0f %%");
+--- a/runtime/ui_text.h
++++ b/runtime/ui_text.h
+@@ -34,6 +34,7 @@
+     UI_MENU_GRAPHICS,         // group heading over the resolution rows
+     UI_MENU_OUTPUT_RES, UI_MENU_OUTPUT_RES_DESC,
+     UI_MENU_RENDER_SCALE, UI_MENU_RENDER_SCALE_DESC, UI_MENU_RENDER_SCALE_GAME,
++    UI_MENU_OOT_RES, UI_MENU_OOT_RES_DESC, UI_MENU_OOT_RES_AUTO,
+     UI_MENU_UPSCALER, UI_MENU_UPSCALER_DESC, UI_MENU_UPSCALER_FSR, UI_MENU_UPSCALER_BILINEAR,
+     UI_MENU_ASPECT, UI_MENU_ASPECT_DESC, UI_MENU_ASPECT_FIT, UI_MENU_ASPECT_STRETCH,
+     UI_MENU_FOV, UI_MENU_FOV_DESC,
+@@ -46,7 +47,7 @@
+ 
+     // Game
+     UI_MENU_FPS_LIMIT, UI_MENU_FPS_LIMIT_DESC, UI_MENU_FPS_30, UI_MENU_FPS_40, UI_MENU_FPS_45, UI_MENU_FPS_60, UI_MENU_FPS_90,
+-    UI_MENU_FPS_120, UI_MENU_FPS_144,
++    UI_MENU_FPS_120, UI_MENU_FPS_144, UI_MENU_FPS_240, UI_MENU_FPS_300, UI_MENU_FPS_UNLIMITED,
+     UI_MENU_FPS_DISPLAY, UI_MENU_FPS_DISPLAY_HZ,
+     UI_MENU_REALTIME, UI_MENU_REALTIME_DESC,
+     UI_MENU_CLOTH_REALTIME, UI_MENU_CLOTH_REALTIME_DESC,
+--- a/runtime/ui_text.c
++++ b/runtime/ui_text.c
+@@ -90,11 +90,15 @@
+     [UI_MENU_COLOR_GAMMA] = "Gamma",
+     [UI_MENU_COLOR_GAMMA_DESC] = "Below 1 brightens dark and middle tones, above 1 darkens them; 1 leaves them.",
+ 
++    [UI_MENU_OOT_RES] = "Ocarina internal 3D resolution",
++    [UI_MENU_OOT_RES_DESC] = "4K requests a 3840 x 2160 internal scene after 30 initialization frames. Experimental; GPU memory use increases. Percentages follow the game output size.",
++    [UI_MENU_OOT_RES_AUTO] = "Game dynamic resolution",
+     [UI_MENU_FPS_LIMIT] = "Frame rate limit",
+     [UI_MENU_FPS_LIMIT_DESC] = "The most frames per second the game draws. Above 60 is experimental and needs Game speed "
+                                "follows the clock.",
+     [UI_MENU_FPS_30] = "30 FPS", [UI_MENU_FPS_40] = "40 FPS", [UI_MENU_FPS_45] = "45 FPS",
+     [UI_MENU_FPS_60] = "60 FPS", [UI_MENU_FPS_90] = "90 FPS", [UI_MENU_FPS_120] = "120 FPS", [UI_MENU_FPS_144] = "144 FPS",
++    [UI_MENU_FPS_240] = "240 FPS", [UI_MENU_FPS_300] = "300 FPS", [UI_MENU_FPS_UNLIMITED] = "Unlimited",
+     // the monitor's refresh rate; printf format with the rate in Hz when it is known
+     [UI_MENU_FPS_DISPLAY] = "Monitor rate", [UI_MENU_FPS_DISPLAY_HZ] = "Monitor rate (%.0f Hz)",
+     [UI_MENU_REALTIME] = "Game speed follows the clock",
+--- a/runtime/ui_text_ko.inc
++++ b/runtime/ui_text_ko.inc
+@@ -44,6 +44,9 @@
+     [UI_MENU_RENDER_SCALE] = "3D 렌더링 비율",
+     [UI_MENU_RENDER_SCALE_DESC] = "게임 해상도에 대한 3D 장면의 크기입니다. 게임의 FSR이 이를 확대합니다. 100 %를 넘으면 계단 현상이 줄지만 GPU 부하가 큽니다. 현재 오카리나 빌드에는 해당 패치가 연결되어 있지 않습니다.",
+     [UI_MENU_RENDER_SCALE_GAME] = "게임 기본값 (83 %)",
++    [UI_MENU_OOT_RES] = "오카리나 내부 3D 해상도",
++    [UI_MENU_OOT_RES_DESC] = "4K는 초기화 30프레임 후 내부 3D 장면을 3840 x 2160으로 설정합니다. 실험적이며 GPU 메모리를 더 사용합니다. 비율은 게임 출력 크기에 맞게 적용됩니다.",
++    [UI_MENU_OOT_RES_AUTO] = "게임 자동 해상도",
+     [UI_MENU_UPSCALER] = "창 크기로 확대",
+     [UI_MENU_UPSCALER_DESC] = "창이 게임 해상도보다 클 때 화면을 확대하는 방식입니다. FSR은 이중 선형 보간보다 윤곽과 세부 표현을 선명하게 유지합니다.",
+     [UI_MENU_UPSCALER_FSR] = "AMD FSR 1",
+@@ -72,7 +75,7 @@
+     [UI_MENU_COLOR_GAMMA] = "감마",
+     [UI_MENU_COLOR_GAMMA_DESC] = "1보다 낮으면 어두운 색과 중간색이 밝아지고, 높으면 어두워집니다. 1이면 그대로 유지합니다.",
+     [UI_MENU_FPS_LIMIT] = "프레임 속도 제한",
+-    [UI_MENU_FPS_LIMIT_DESC] = "지원되는 게임에서 초당 그리는 프레임 수의 상한입니다. 60을 넘기는 기능은 실험적이며 실시간 게임 속도 기능이 필요합니다. 현재 오카리나 빌드에서는 이 설정으로 60 FPS 제한을 해제할 수 없습니다.",
++    [UI_MENU_FPS_LIMIT_DESC] = "초당 그리는 프레임 수의 상한입니다. 오카리나 실시간 처리 빌드에서 300과 제한 없음을 선택할 수 있습니다. 실제 성능은 CPU와 GPU에 따라 달라지며 고프레임 동작은 실험적입니다.",
+     [UI_MENU_FPS_30] = "30 FPS",
+     [UI_MENU_FPS_40] = "40 FPS",
+     [UI_MENU_FPS_45] = "45 FPS",
+@@ -80,6 +83,9 @@
+     [UI_MENU_FPS_90] = "90 FPS",
+     [UI_MENU_FPS_120] = "120 FPS",
+     [UI_MENU_FPS_144] = "144 FPS",
++    [UI_MENU_FPS_240] = "240 FPS",
++    [UI_MENU_FPS_300] = "300 FPS",
++    [UI_MENU_FPS_UNLIMITED] = "제한 없음",
+     [UI_MENU_FPS_DISPLAY] = "모니터 주사율",
+     [UI_MENU_FPS_DISPLAY_HZ] = "모니터 주사율 (%.0f Hz)",
+     [UI_MENU_REALTIME] = "실시간 게임 속도",
+--- a/runtime/third_party/eglantine/shader_recompiler/frontend/ampere/register_pressure.h
++++ b/runtime/third_party/eglantine/shader_recompiler/frontend/ampere/register_pressure.h
+@@ -18,7 +18,7 @@
+ // Preserve high guest registers in SSA while borrowing aligned low quartets
+ // for one native instruction. The expanded instruction owns its temporary bank.
+ inline RegisterPressure PrepareRegisterPressure(const Instruction& input, u32 reserved) {
+-    RegisterPressure result{input};
++    RegisterPressure result{input, {}, {}};
+     if (reserved < 4 || reserved > 246 || (reserved & 3)) {
+         result.valid = false;
+         return result;
+@@ -78,6 +78,7 @@
+         operand(24);
+         break;
+     case 0xa24:
++    case 0xc24: // IMAD with a uniform multiplier: Rd, Ra and the addend Rc are registers
+     case 0xa23:
+     case 0x623:
+     case 0x423:
+@@ -101,6 +102,17 @@
+     case 0x927:
+         operand(24);
+         operand(32);
++        break;
++    case 0x9a8: // ATOMG: result in Rd, data operand at bit 32.
++        operand(16);
++        operand(32);
++        break;
++    case 0xb6c:
++    case 0xf6c: // TXD: result pairs, coordinates (including an optional layer), and four gradients.
++        operand(16, 2);
++        operand(24, input.Bits(61, 3) == 5 ? 3 : 2);
++        operand(32, 4);
++        operand(64, 2);
+         break;
+     case 0x224:
+     case 0x223:
+--- a/runtime/third_party/eglantine/shader_recompiler/frontend/ampere/lower_to_maxwell.h
++++ b/runtime/third_party/eglantine/shader_recompiler/frontend/ampere/lower_to_maxwell.h
+@@ -301,11 +301,11 @@
+                 insn.Bits(16, 8) <= *active_link && *active_link < insn.Bits(16, 8) + written)
+                 return fail(index, "native callee overwrites link register");
+         }
+-        RegisterPressure pressure{insn};
++        RegisterPressure pressure{insn, {}, {}};
+         bool requires_shadow = false;
+         for (u32 bit : {16U, 24U, 32U, 64U}) {
+             if (opcode == 0x81c) break;
+-            if (bit == 32 && insn.Bits(9, 3) != 1 && opcode != 0xb60 && opcode != 0xb66 && opcode != 0x986 && opcode != 0x987 && opcode != 0xf66 && opcode != 0x988 && opcode != 0x927 && opcode != 0x98e && opcode != 0x59f) continue;
++            if (bit == 32 && insn.Bits(9, 3) != 1 && opcode != 0xb60 && opcode != 0xb66 && opcode != 0xb6c && opcode != 0xf6c && opcode != 0x986 && opcode != 0x987 && opcode != 0xf66 && opcode != 0x988 && opcode != 0x927 && opcode != 0x9a8 && opcode != 0x98e && opcode != 0x59f) continue;
+             const u32 reg = insn.Bits(bit, 8);
+             if (reg >= (uses_uniform_bank ? high_uniform_base : 246U) && reg < 255)
+                 requires_shadow = true;
+@@ -2542,9 +2542,10 @@
+                 (per_tap && (bindless || depth || insn.Bits(80, 1) || insn.Bits(91, 1))) ||
+                 insn.Bits(89, 1) || mask == 0 ||
+                 (bindless ? (handle >= 246 || insn.Bits(46, 13) || !insn.Bits(91, 1))
+-                          : (insn.Bits(40, 14) > 0x1fff || binding >= 18 ||
+-                             (result.required_texture_buffer != ~0U && result.required_texture_buffer != binding))))
++                          : (insn.Bits(40, 14) > 0x1fff || binding >= 18)))
+                 return fail(index, "native texture gather mode");
++            // Lichii bf4c42e2: a gather from a second descriptor buffer uses a loaded bindless handle.
++            const bool second_buffer = !bindless && !bind_texture_buffer(binding);
+             if (per_tap) {
+                 if (!insn.Bits(60, 1) || mask != 15 || source_a + 1 >= register_limit ||
+                     source_b + 1 >= register_limit || (dest != 255 && dest + 1 >= register_limit) ||
+@@ -2659,7 +2660,6 @@
+                         emit(0x010000000007f000ULL | (248 + i) | (u64{*packed_offsets[i]} << 20));
+                 }
+             }
+-            if (!bindless) result.required_texture_buffer = binding;
+             // Two coordinates: x in Ra, y in Rb (the coordinate list splits evenly across them);
+             // with an offset, x and y in Ra, Ra+1 and the offset in Rb.
+             const u32 y = !offsets && !per_tap && !depth ? source_b : source_a == 255 ? 255U : source_a + 1;
+@@ -2668,15 +2668,24 @@
+                  (u64{array ? source_a + 1 : y} << 20));
+             if (array)
+                 emit(0x5c98000000000000ULL | predicate | 252 | (u64{15} << 39) | (u64{source_b} << 20));
+-            if (offsets || depth) {
+-                emit(0x5c98000000000000ULL | predicate | 246 | (u64{15} << 39) | (u64{source_b} << 20));
+-            }
+-            if (bindless) {
++            if (second_buffer) {
++                const u32 meta = per_tap ? 247U : 246U;
++                emit(0x4c98000000070000ULL | meta | (u64{15} << 39) | (u64{insn.Bits(40, 14)} << 20) |
++                     (u64{binding} << 34));
++                if (offsets || depth)
++                    emit(0x5c98000000000000ULL | predicate | 247 | (u64{15} << 39) | (u64{source_b} << 20));
++                emit(0xdec0000000000000ULL | predicate | 250 | (u64{250} << 8) | (u64{meta} << 20) |
++                     (u64{array ? 3U : 2U} << 28) | (u64{mask} << 31) |
++                     (u64{per_tap ? 2U : offsets ? 1U : 0U} << 36) | (u64{insn.Bits(87, 2)} << 38) |
++                     (u64{insn.Bits(90, 1)} << 49) | (u64{depth} << 50) | (u64{7} << 51));
++            } else if (bindless) {
+                 emit(0x5c98000000000000ULL | predicate | 246 | (u64{15} << 39) | (u64{handle} << 20));
+                 emit(0xdec0000000000000ULL | predicate | 250 | (u64{250} << 8) | (u64{246} << 20) |
+                      (u64{array ? 3U : 2U} << 28) | (u64{mask} << 31) | (u64{insn.Bits(87, 2)} << 38) |
+                      (u64{insn.Bits(90, 1)} << 49) | (u64{7} << 51));
+             } else {
++            if (offsets || depth)
++                emit(0x5c98000000000000ULL | predicate | 246 | (u64{15} << 39) | (u64{source_b} << 20));
+             emit(0xc800000000000000ULL | predicate | 250 | (u64{250} << 8) |
+                  (u64{per_tap ? 248U : offsets || depth ? 246U : 255U} << 20) | (u64{array ? 3U : 2U} << 28) | (u64{mask} << 31) |
+                  (u64{insn.Bits(40, 14)} << 36) | (u64{insn.Bits(90, 1)} << 49) | (u64{depth} << 50) | (u64{7} << 51) |
+--- a/runtime/third_party/eglantine/shader_recompiler/frontend/ampere/program_capture.h
++++ b/runtime/third_party/eglantine/shader_recompiler/frontend/ampere/program_capture.h
+@@ -61,7 +61,10 @@
+         }
+         if (opcode == 0x949 || opcode == 0x958) computed_branch = true;
+         if (computed_branch) return Result::Continue;
+-        if (opcode == 0x94d && instruction.Bits(12, 4) == 7 && index >= last_forward_target) {
++        // EXIT has both the instruction guard and its own predicate. Capture must agree with the lowerer:
++        // a conditional EXIT can fall through, and must not truncate a program or arm a following RET.
++        if (opcode == 0x94d && instruction.Bits(12, 4) == 7 && instruction.Bits(87, 4) == 7 &&
++            index >= last_forward_target) {
+             if (index >= last_call_target) return Result::Complete;
+             main_exited = true;
+         }
+--- a/tools/build_game.py
++++ b/tools/build_game.py
+@@ -273,7 +273,7 @@
+     return out / 'obj' / 'runtime' / rel.with_suffix('.o')
+ 
+ 
+-def module_glue(layout, linked, hashes, paths, version):
++def module_glue(layout, linked, hashes, paths, version, oot_clock=False):
+     """C for build/<version>/modules.c: the layout table, the linked modules' function tables (dispatch.h), the
+     expected ExeFS hashes, the game version and the default game paths (host.h)."""
+     out = [f'// Module glue written by tools/build_game.py; do not edit. {GENERATED_MARKER}',
+@@ -300,7 +300,9 @@
+     for name in ('exefs', 'romfs', 'profile'):
+         out.append(f'const char rt_default_{name}[] = {c_string(paths[name].as_posix())};')
+     number = int(DISPLAY_VERSIONS[version].replace('.', '')) if version in DISPLAY_VERSIONS else 0   # 1.4.3 -> 143
+-    out += [f'const int rt_game_version = {number};', f'const char rt_port_version[] = {c_string(port_version())};', '']
++    out += [f'const int rt_game_version = {number};',
++            f'const int rt_oot_clock = {int(version == "oot111" and oot_clock)};',
++            f'const char rt_port_version[] = {c_string(port_version())};', '']
+     return '\n'.join(out)
+ 
+ 
+@@ -819,7 +821,11 @@
+     if missing:
+         sys.exit(f'{expected}: no exefs_sha256 for {missing}')
+     if not args.make_runtime_lib:
+-        write_if_changed(out / 'modules.c', module_glue(layout, linked, hashes, paths, args.version))
++        # Only bypass whole-vsync pacing when the authored real-time game hook is actually compiled in.
++        clock_source = gen / 'main/main_0087.c'
++        oot_clock = (args.version == 'oot111' and clock_source.is_file() and
++                     'fp_op_s(c, FOP_DIV, 8, 1, 0); oot_dyn_dt(c);' in clock_source.read_text())
++        write_if_changed(out / 'modules.c', module_glue(layout, linked, hashes, paths, args.version, oot_clock))
+     if (paths['romfs'] / 'index.json').is_file():
+         count, size, dt = romfs_index.write(paths['romfs'], out)
+         print(f'romfs index: {count} files, {mib(size)}, {dt:.1f} s')
+--- a/tools/oot/patch_generated.py
++++ b/tools/oot/patch_generated.py
+@@ -34,7 +34,7 @@
+ 
+ '''
+ 
+-FIXED_RES = r'''/* Fixed 3D resolution (OOT_RESOLUTION in the ini, TOTK_OOT_RESOLUTION in the environment, live): the scene at a set fraction of the output instead of the game's dynamic
++FIXED_RES_V1 = r'''/* Fixed 3D resolution (OOT_RESOLUTION in the ini, TOTK_OOT_RESOLUTION in the environment, live): the scene at a set fraction of the output instead of the game's dynamic
+    resolution (~1706x960 for 1920x1080). The flag at +0x94 (main+0x805bd0, the site of Lichii's "Max Resolution" patch)
+    picks the GPU-time controller; the other path (L_700080640c) returns a fixed scale, 1.0 as shipped. The dynamic path
+    runs 30 frames first: it also writes fields the rest of the frame reads (+8, +16, +168), and the fixed path taken
+@@ -66,6 +66,52 @@
+ 
+ '''
+ 
++# This upgrades only the authored hook above, never game-derived instructions.
++FIXED_RES = r'''/* Fixed 3D resolution v2: the existing 30-frame dynamic initialization is mandatory.
++   OOT_RESOLUTION=4k requests an internal 3840x2160 scene using the observed NVN output size.
++   Percent modes retain their v1 behavior. Actual target observation is logged by the host renderer. */
++extern const char *cfg_get(const char *);
++extern unsigned cfg_version(void);
++extern void rt_log(const char *, ...);
++extern double strtod(const char *, char **);
++extern float oot_internal_4k_scale(void);
++static int oot_dynres_runs;
++static uint32_t oot_res_bits = 0x3f800000u;
++static int oot_fixed_res(void) {
++    static unsigned seen = ~0u;
++    static int mode;
++    unsigned v = cfg_version();
++    if (v != seen) {
++        seen = v;
++        const char *s = cfg_get("TOTK_OOT_RESOLUTION");
++        if (!s || !*s) s = "auto";
++        char *end;
++        double pct = strtod(s, &end);
++        mode = end != s && !*end && pct >= 25 && pct <= 200;
++        if (mode) { union { float f; uint32_t u; } k = {(float)(pct / 100)}; oot_res_bits = k.u; }
++        if (s[0] == '4' && s[1] == 'k' && !s[2]) mode = 2;
++        rt_log("resolution: 3D policy %s (4k is an experimental internal scene target)", s);
++    }
++    if (mode == 2) {
++        float scale = oot_internal_4k_scale();
++        if (scale <= 0) return 0;
++        union { float f; uint32_t u; } k = {scale};
++        oot_res_bits = k.u;
++    }
++    return mode && oot_dynres_runs >= 30;
++}
++
++'''
++
++
++def upgrade_fixed_resolution(text):
++    if FIXED_RES in text:
++        return text
++    if text.count(FIXED_RES_V1) != 1:
++        raise ValueError('Known authored fixed-resolution hook not found; no game code changed')
++    return text.replace(FIXED_RES_V1, FIXED_RES)
++
++
+ EDITS = [
+     ('main_0087.c', 'void f_70006e6be0(Cpu *c) {\n', DYN_DT + 'void f_70006e6be0(Cpu *c) {\n'),
+     ('main_0087.c', '    fp_op_s(c, FOP_DIV, 8, 1, 0);\n', '    fp_op_s(c, FOP_DIV, 8, 1, 0); oot_dyn_dt(c);   /* real time step, main+0x6e6dc4 */\n'),
+@@ -96,6 +142,8 @@
+     for name, old, new in EDITS:
+         p = root / name
+         text = p.read_bytes().decode('utf-8', 'surrogateescape')
++        if FIXED_RES_V1 in text:
++            text = upgrade_fixed_resolution(text)
+         p.write_bytes(apply(text, old, new).encode('utf-8', 'surrogateescape'))
+     print('patch_generated: ok')
+ 
+--- /dev/null
++++ b/instalador/update-graphics-4k.ps1
+@@ -0,0 +1,85 @@
++# Combined graphics, FPS and internal 4K source update for the existing owned-game installation.
++param([string]$InstallRoot, [switch]$SemJanela)
++$ErrorActionPreference = 'Stop'
++function Quote-GraphicsArgument([string]$Value) {
++    $quoted = [regex]::Replace($Value, '(\\*)"', '$1$1\"')
++    $quoted = [regex]::Replace($quoted, '(\\+)$', '$1$1')
++    return '"' + $quoted + '"'
++}
++if ($MyInvocation.InvocationName -eq '.') { return }
++$progress = $null
++$process = $null
++try {
++    if (-not $SemJanela) {
++        Add-Type -AssemblyName System.Windows.Forms, System.Drawing
++        [Windows.Forms.Application]::EnableVisualStyles()
++        if (-not $InstallRoot) {
++            $dialog = New-Object Windows.Forms.FolderBrowserDialog
++            $dialog.Description = '기존 OcarinaRecomp 설치 폴더를 선택하세요. 그래픽 수정, FPS 제한 해제, 내부 4K를 함께 적용합니다.'
++            if (Test-Path -LiteralPath 'C:\OcarinaRecomp') { $dialog.SelectedPath = 'C:\OcarinaRecomp' }
++            if ($dialog.ShowDialog() -ne 'OK') { $dialog.Dispose(); exit 0 }
++            $InstallRoot = $dialog.SelectedPath
++            $dialog.Dispose()
++        }
++    }
++    if (-not $InstallRoot) { throw '기존 게임 설치 폴더가 필요합니다.' }
++    $root = [IO.Path]::GetFullPath($InstallRoot)
++    $game = [IO.Path]::GetFullPath((Join-Path $root 'build/oot111/ocarina.exe'))
++    if (Get-Process ocarina -ErrorAction SilentlyContinue | Where-Object { $_.Path -and [string]::Equals($_.Path, $game, [StringComparison]::OrdinalIgnoreCase) }) {
++        throw '게임을 종료한 뒤 다시 실행하세요.'
++    }
++    $python = Join-Path $root 'ferramentas/python/python.exe'
++    if (-not (Test-Path -LiteralPath $python -PathType Leaf)) { throw '설치된 도구를 찾지 못했습니다. ferramentas 폴더가 있는 기존 OcarinaRecomp 폴더를 선택하세요.' }
++    $helper = Join-Path $PSScriptRoot 'update_graphics_4k.py'
++    if (-not $SemJanela) {
++        $progress = New-Object Windows.Forms.Form
++        $progress.Text = '오카리나 그래픽 · FPS · 4K 업데이트 중'
++        $progress.ClientSize = New-Object Drawing.Size(610, 155)
++        $progress.StartPosition = 'CenterScreen'
++        $progress.ControlBox = $false
++        $progress.Font = New-Object Drawing.Font('Malgun Gothic', 10)
++        $status = New-Object Windows.Forms.Label
++        $status.SetBounds(18, 18, 575, 120)
++        $status.Text = "기존 실행 파일과 설정을 백업하고 그래픽·프레임·해상도 코드를 수정합니다.`n설치된 도구로 실행 파일을 다시 컴파일합니다. 몇 분 걸릴 수 있습니다.`n`n내부 4K · FPS 제한 없음 · 기본 색감으로 설정합니다. 저장 파일과 한국어는 유지됩니다."
++        $progress.Controls.Add($status)
++        $progress.Show(); $progress.Refresh()
++    }
++    $psi = New-Object Diagnostics.ProcessStartInfo
++    $psi.FileName = $python
++    $psi.Arguments = (@($helper, '--root', $root) | ForEach-Object { Quote-GraphicsArgument ([string]$_) }) -join ' '
++    $psi.WorkingDirectory = $root
++    $psi.UseShellExecute = $false
++    $psi.CreateNoWindow = $true
++    $psi.RedirectStandardOutput = $true
++    $psi.RedirectStandardError = $true
++    $psi.StandardOutputEncoding = New-Object Text.UTF8Encoding($false)
++    $psi.StandardErrorEncoding = New-Object Text.UTF8Encoding($false)
++    $psi.EnvironmentVariables['PYTHONUTF8'] = '1'
++    $process = New-Object Diagnostics.Process
++    $process.StartInfo = $psi
++    [void]$process.Start()
++    $stdout = $process.StandardOutput.ReadToEndAsync()
++    $stderr = $process.StandardError.ReadToEndAsync()
++    while (-not $process.HasExited) {
++        if (-not $SemJanela) { [Windows.Forms.Application]::DoEvents() }
++        [Threading.Thread]::Sleep(50)
++    }
++    $process.WaitForExit()
++    $text = $stdout.GetAwaiter().GetResult()
++    $errorText = $stderr.GetAwaiter().GetResult()
++    if (-not $text.Trim()) { throw $errorText }
++    $result = $text | ConvertFrom-Json
++    if ($process.ExitCode -ne 0) { throw $result.error }
++    if ($progress) { $progress.Close() }
++    Write-Output $text
++    if (-not $SemJanela) {
++        [void][Windows.Forms.MessageBox]::Show("$($result.message)`n`n기존 게임 바로가기로 실행하세요. 재설치하거나 NUP를 다시 선택할 필요가 없습니다.`n`n실제 게임의 그래픽·4K·300FPS는 아직 검증 전입니다. 성능은 PC에 따라 달라집니다.", '오카리나 그래픽 · FPS · 4K 업데이트', 'OK', 'Information')
++    }
++} catch {
++    if ($SemJanela) { throw }
++    [void][Windows.Forms.MessageBox]::Show($_.Exception.Message, '오카리나 그래픽 · FPS · 4K 업데이트', 'OK', 'Error')
++    exit 1
++} finally {
++    if ($process) { $process.Dispose() }
++    if ($progress) { $progress.Dispose() }
++}
+--- /dev/null
++++ b/instalador/graphics-4k-bootstrap.ps1
+@@ -0,0 +1,11 @@
++$ErrorActionPreference = 'Stop'
++try {
++    Add-Type -AssemblyName System.IO.Compression.FileSystem
++    $destination = Join-Path $env:OCARINA_BUNDLE_DIR 'unpacked'
++    [IO.Compression.ZipFile]::ExtractToDirectory($env:OCARINA_BUNDLE_ZIP, $destination)
++    & (Join-Path $destination 'Ocarina-Graphics-4K/update-graphics-4k.ps1')
++} catch {
++    Add-Type -AssemblyName System.Windows.Forms
++    [void][Windows.Forms.MessageBox]::Show($_.Exception.Message, '오카리나 그래픽 · FPS · 4K 업데이트', 'OK', 'Error')
++    exit 1
++}
+--- a/instalador/singlefile.c
++++ b/instalador/singlefile.c
+@@ -87,7 +87,16 @@
+     result = (int)code;
+     goto done;
+ failure:
+-#if defined(ANALYSIS_EXPORTER)
++#if defined(GRAPHICS_4K)
++    MessageBoxW(NULL, L"그래픽·FPS·4K 업데이트 도구를 준비하지 못했습니다. 임시 폴더의 여유 공간을 확인하고 다시 실행하세요.",
++                L"오카리나 그래픽 · FPS · 4K 업데이트", MB_OK | MB_ICONERROR);
++#elif defined(PLAYBACK_FIX)
++    MessageBoxW(NULL, L"오카리나 연주 수정 도구를 준비하지 못했습니다. 임시 폴더의 여유 공간을 확인하고 다시 실행하세요.",
++                L"오카리나 연주 수정", MB_OK | MB_ICONERROR);
++#elif defined(DISPLAY_RECOVERY)
++    MessageBoxW(NULL, L"화면 복구 도구를 준비하지 못했습니다. 임시 폴더의 여유 공간을 확인하고 다시 실행하세요.",
++                L"Ocarina 화면 복구", MB_OK | MB_ICONERROR);
++#elif defined(ANALYSIS_EXPORTER)
+     MessageBoxW(NULL, L"분석 도구를 준비하지 못했습니다. 임시 폴더의 여유 공간을 확인하고 다시 실행하세요.\n\nWindows 10/11 64비트와 Windows PowerShell이 필요합니다.",
+                 L"Ocarina 분석 자료 내보내기", MB_OK | MB_ICONERROR);
+ #else
+--- a/tools/oot/package_singlefile.py
++++ b/tools/oot/package_singlefile.py
+@@ -15,12 +15,22 @@
+     parser.add_argument('--windres', type=Path, required=True)
+     parser.add_argument('--out', type=Path, required=True)
+     parser.add_argument('--analysis', action='store_true', help='package the standalone private-analysis helper instead of setup')
++    parser.add_argument('--display-recovery', action='store_true', help='package the ko2 upscaler-test recovery helper')
++    parser.add_argument('--playback-fix', action='store_true', help='package the controller-playback HID fix')
++    parser.add_argument('--graphics-4k', action='store_true', help='package the graphics, FPS and internal 4K update')
+     args = parser.parse_args()
++    if sum((args.analysis, args.display_recovery, args.playback_fix, args.graphics_4k)) > 1:
++        parser.error('helper modes are mutually exclusive')
+     args.out.parent.mkdir(parents=True, exist_ok=True)
+     with tempfile.TemporaryDirectory() as temp:
+         folder = Path(temp)
+         script = folder / 'bootstrap.ps1'
+-        source = (ROOT / ('instalador/analysis-bootstrap.ps1' if args.analysis else 'instalador/bootstrap.ps1')).read_text(encoding='utf-8-sig')
++        bootstrap = 'display-recovery-bootstrap.ps1' if args.display_recovery else 'analysis-bootstrap.ps1' if args.analysis else 'bootstrap.ps1'
++        if args.playback_fix:
++            bootstrap = 'playback-fix-bootstrap.ps1'
++        if args.graphics_4k:
++            bootstrap = 'graphics-4k-bootstrap.ps1'
++        source = (ROOT / 'instalador' / bootstrap).read_text(encoding='utf-8-sig')
+         script.write_bytes(b'\xef\xbb\xbf' + source.replace('\n', '\r\n').encode('utf-8'))
+         manifest = folder / 'setup.manifest'
+         manifest.write_text('''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+@@ -59,11 +69,30 @@
+             rc.write_text(rc.read_text().replace('Ocarina Recomp Korean Native Build Setup', 'Ocarina Recomp Private Analysis Export')
+                           .replace('Ocarina Recomp Korean Setup', 'Ocarina Recomp Analysis Export')
+                           .replace('Ocarina_Korean_Setup.exe', 'Ocarina_Analysis_Export.exe'))
++        if args.display_recovery:
++            rc.write_text(rc.read_text().replace('Ocarina Recomp Korean Native Build Setup', 'Ocarina Recomp Display Recovery')
++                          .replace('Ocarina Recomp Korean Setup', 'Ocarina Recomp Display Recovery')
++                          .replace('Ocarina_Korean_Setup.exe', 'Ocarina_Display_Recovery.exe'))
++        if args.playback_fix:
++            rc.write_text(rc.read_text().replace('Ocarina Recomp Korean Native Build Setup', 'Ocarina Recomp Ocarina Playback Fix')
++                          .replace('Ocarina Recomp Korean Setup', 'Ocarina Recomp Controller Playback Fix')
++                          .replace('Ocarina_Korean_Setup.exe', 'Ocarina_Playback_Fix.exe'))
+         resource = folder / 'setup.res'
++        if args.graphics_4k:
++            manifest.write_text(manifest.read_text().replace('OcarinaRecomp.KoreanSetup', 'OcarinaRecomp.GraphicsFPS4K')
++                                .replace('version="0.2.5.2"', 'version="0.2.6.1"'))
++            rc.write_text(rc.read_text().replace('Ocarina Recomp Korean Native Build Setup', 'Ocarina Native Graphics FPS Internal 4K Update')
++                          .replace('Ocarina Recomp Korean Setup', 'Ocarina Graphics FPS Internal 4K')
++                          .replace('Ocarina_Korean_Setup.exe', 'Ocarina_Graphics_FPS_4K_Update.exe')
++                          .replace('0.2.5-ko2', '0.2.6-graphics4k-v1')
++                          .replace('VERSION 0,2,5,2', 'VERSION 0,2,6,1'))
+         subprocess.run([str(args.windres), '-i', str(rc), '-o', str(resource), '-O', 'coff'], check=True)
+         subprocess.run([str(args.cc), '-std=c11', '-O2', '-Wall', '-Wextra', '-Werror', '-municode', '-mwindows',
+                         str(ROOT / 'instalador/singlefile.c'), str(resource), '-lole32', '-static', '-s',
+-                        *(['-DANALYSIS_EXPORTER=1'] if args.analysis else []), '-o', str(args.out)], check=True)
++                        *(['-DANALYSIS_EXPORTER=1'] if args.analysis else []),
++                        *(['-DDISPLAY_RECOVERY=1'] if args.display_recovery else []),
++                        *(['-DPLAYBACK_FIX=1'] if args.playback_fix else []),
++                        *(['-DGRAPHICS_4K=1'] if args.graphics_4k else []), '-o', str(args.out)], check=True)
+     print(f'{args.out}: {args.out.stat().st_size:,} bytes')
+ 
+ 
+--- /dev/null
++++ b/tools/oot/make_graphics_4k_update.py
+@@ -0,0 +1,70 @@
++#!/usr/bin/env python3
++"""Build a game-free native EXE that updates an existing Ocarina installation locally."""
++import argparse
++import hashlib
++import json
++from pathlib import Path
++import subprocess
++import sys
++import zipfile
++
++ROOT = Path(__file__).resolve().parents[2]
++PAYLOAD = [
++    'runtime/frame_rate.c', 'runtime/oot_render_policy.c', 'runtime/oot_render_policy.h',
++    'runtime/nvn_api_obj.c', 'runtime/vk_exec_draw.c', 'runtime/cfg.c',
++    'runtime/ui/menu.cpp', 'runtime/ui_text.h', 'runtime/ui_text.c', 'runtime/ui_text_ko.inc',
++    'runtime/third_party/eglantine/shader_recompiler/frontend/ampere/register_pressure.h',
++    'runtime/third_party/eglantine/shader_recompiler/frontend/ampere/lower_to_maxwell.h',
++    'runtime/third_party/eglantine/shader_recompiler/frontend/ampere/program_capture.h',
++    'tools/build_game.py', 'tools/oot/patch_generated.py',
++]
++HELPERS = ['update_graphics_4k.py', 'fix_ocarina_playback.py', 'patch_generated.py']
++SOURCE = ['instalador/update-graphics-4k.ps1', 'instalador/graphics-4k-bootstrap.ps1', 'instalador/singlefile.c',
++          'tools/oot/package_singlefile.py', 'tools/oot/make_graphics_4k_update.py',
++          'tests/oot_graphics_policy_test.py', 'tests/oot_graphics_update_test.py',
++          'tests/native_exit_capture.cpp', 'tests/native_exit_capture_test.py',
++          'tests/ounce_vibration_test.py', 'tests/ocarina_playback_patch_test.py',
++          'runtime/ov_input.c', 'LICENSE', 'LICENSE-MIT', 'THIRD_PARTY_NOTICES.md',
++          'docs/oot-graphics-fps-4k.md']
++
++
++def fingerprint(raw):
++    return hashlib.sha256(raw.replace(b'\r\n', b'\n')).hexdigest()
++
++
++def main():
++    ap = argparse.ArgumentParser(description=__doc__)
++    ap.add_argument('--base', type=Path, required=True, help='unmodified Korean ko2 source tree')
++    ap.add_argument('--cc', type=Path, required=True)
++    ap.add_argument('--windres', type=Path, required=True)
++    ap.add_argument('--out', type=Path, required=True)
++    args = ap.parse_args()
++    args.out.parent.mkdir(parents=True, exist_ok=True)
++    archive = args.out.with_suffix('.zip')
++    manifest = dict(update='oot-graphics-fps-internal4k-v1', upstream='fe7a9399a6daa5a789e7557e5a193db8f3055c2a',
++                    lichii_reference='bf4c42e223d4812d4456d3d8f66d892571d19a13', files=[])
++    prefix = 'Ocarina-Graphics-4K/'
++    with zipfile.ZipFile(archive, 'w', zipfile.ZIP_DEFLATED, compresslevel=9) as bundle:
++        for rel in PAYLOAD:
++            data = (ROOT / rel).read_bytes()
++            old = args.base / rel
++            manifest['files'].append(dict(path=rel, before=fingerprint(old.read_bytes()) if old.is_file() else None,
++                                          after=fingerprint(data)))
++            bundle.writestr(prefix + 'payload/' + rel, data)
++        bundle.writestr(prefix + 'manifest.json', json.dumps(manifest, indent=2))
++        for name in HELPERS:
++            bundle.write(ROOT / 'tools/oot' / name, prefix + name)
++        wrapper = (ROOT / 'instalador/update-graphics-4k.ps1').read_text(encoding='utf-8-sig')
++        bundle.writestr(prefix + 'update-graphics-4k.ps1', b'\xef\xbb\xbf' + wrapper.replace('\n', '\r\n').encode())
++        for rel in SOURCE + ['tools/oot/' + name for name in HELPERS]:
++            bundle.write(ROOT / rel, prefix + 'source/' + rel)
++        bundle.write(ROOT / 'docs/oot-graphics-fps-4k.md', prefix + 'README_KO.md')
++    with zipfile.ZipFile(archive) as bundle:
++        assert bundle.testzip() is None
++    subprocess.run([sys.executable, str(ROOT / 'tools/oot/package_singlefile.py'), str(archive),
++                    '--cc', str(args.cc.absolute()), '--windres', str(args.windres.absolute()),
++                    '--out', str(args.out.absolute()), '--graphics-4k'], check=True)
++
++
++if __name__ == '__main__':
++    main()
+--- /dev/null
++++ b/tests/oot_graphics_policy_test.py
+@@ -0,0 +1,104 @@
++"""Exercise the real frame limiter, output-size policy and authored resolution hook without game files."""
++import argparse
++import importlib.util
++from pathlib import Path
++import subprocess
++import tempfile
++
++ROOT = Path(__file__).resolve().parents[1]
++
++
++def main():
++    ap = argparse.ArgumentParser()
++    ap.add_argument('--cc', default='clang')
++    args = ap.parse_args()
++    spec = importlib.util.spec_from_file_location('pg', ROOT / 'tools/oot/patch_generated.py')
++    pg = importlib.util.module_from_spec(spec)
++    spec.loader.exec_module(pg)
++    source = r'''
++#include <assert.h>
++#include <math.h>
++#include <stdint.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include "frame_rate.c"
++const int rt_oot_clock = CLOCK;
++const int rt_game_version = 0;
++static const char *setting = "300", *resolution = "4k";
++static unsigned revision;
++const char *cfg_get(const char *key) {
++    if (!strcmp(key,"TOTK_FPS_LIMIT")) return setting;
++    if (!strcmp(key,"TOTK_OOT_RESOLUTION")) return resolution;
++    return NULL;
++}
++unsigned cfg_version(void) { return revision; }
++void rt_log(const char *fmt, ...) { (void)fmt; }
++int rt_patch_set(const char *name) { (void)name; return -1; }
++int rt_patch_enabled(int set) { (void)set; return 0; }
++void rt_patch_disable(int set) { (void)set; }
++void rt_patch_switch(int set,int on) { (void)set;(void)on; }
++void *rt_patch_page(void) { return NULL; }
++double gfx_window_refresh_hz(void) { return 144; }
++'''
++    source += pg.FIXED_RES
++    source += r'''
++static void cap(const char *value, uint64_t expected) {
++    setting = value; revision++;
++    assert(frame_step_cap_ns() == expected);
++}
++int main(int argc, char **argv) {
++    const int timed = CLOCK && argc == 1;
++    if (argc > 1) assert(!strcmp(argv[1],"disabled"));
++    frame_step_init();
++    assert(frame_step_realtime() == timed);
++    cap("300",3333333); cap("240",4166667); cap("display",6944444);
++    cap("unlimited",timed ? 0 : 16666667);
++    assert(frame_step_limit_hz() == (timed ? 0 : 60));
++    cap("bad",16666667); cap("30",33333333); cap("360",2777778);
++    assert(oot_internal_4k_scale() == 0);
++    if (CLOCK) {
++        oot_note_output(1280,720); assert(oot_internal_4k_scale() == 3);
++        oot_note_output(1920,1080); assert(oot_internal_4k_scale() == 2);
++        oot_note_output(2560,1440); assert(oot_internal_4k_scale() == 1.5f);
++        for (oot_dynres_runs=0;oot_dynres_runs<30;oot_dynres_runs++) assert(!oot_fixed_res());
++        assert(oot_fixed_res());
++        union { uint32_t u; float f; } scale = {oot_res_bits}; assert(scale.f == 1.5f);
++        oot_note_output(3840,2160); assert(oot_fixed_res()); scale.u=oot_res_bits; assert(scale.f==1);
++        oot_note_output(1280,800); assert(!oot_fixed_res());
++        oot_note_output(1920,1080); assert(oot_fixed_res());
++        resolution="100";revision++;assert(oot_fixed_res()); scale.u=oot_res_bits;assert(scale.f==1);
++        resolution="auto";revision++;assert(!oot_fixed_res());
++        resolution="garbage";revision++;assert(!oot_fixed_res());
++    }
++    puts("PASS: real FPS limiter, clock guard, internal 4K output scaling, 30-frame initialization and live modes");
++}
++'''
++    with tempfile.TemporaryDirectory() as temp:
++        folder = Path(temp)
++        (folder / 'layout.h').write_text('#define MOD_MAIN_BASE 0x7000000000ull\n')
++        (folder / 'policy.c').write_text(source)
++        for clock in (0, 1):
++            exe = folder / f'policy-{clock}'
++            subprocess.run([args.cc, '-std=gnu11', '-O2', '-Wall', '-Wextra', '-Werror', '-Wno-unused-function',
++                            '-ffunction-sections', '-fdata-sections', f'-DCLOCK={clock}',
++                            '-I', str(folder), '-I', str(ROOT / 'runtime'), str(folder / 'policy.c'),
++                            str(ROOT / 'runtime/oot_render_policy.c'), '-Wl,--gc-sections', '-lm', '-o', str(exe)], check=True)
++            subprocess.run([str(exe)], check=True)
++            if clock:
++                import os
++                subprocess.run([str(exe), 'disabled'], env=dict(os.environ, OOT_DYN_DT='0'), check=True)
++    original = '/* fixture */\n' + pg.FIXED_RES_V1 + 'void fixture(void) {}\n'
++    updated = pg.upgrade_fixed_resolution(original)
++    assert pg.upgrade_fixed_resolution(updated) == updated
++    assert updated.startswith('/* fixture */') and updated.endswith('void fixture(void) {}\n')
++    try:
++        pg.upgrade_fixed_resolution('unknown hook')
++        raise AssertionError('unknown generated source accepted')
++    except ValueError:
++        pass
++    print('PASS: authored-block-only upgrade, idempotence, unknown-source rejection')
++
++
++if __name__ == '__main__':
++    main()
+--- /dev/null
++++ b/tests/oot_graphics_update_test.py
+@@ -0,0 +1,127 @@
++"""Test real update planning, backups and rollback with authored installation/PE fixtures, no game."""
++import json
++import os
++from pathlib import Path
++import sys
++import tempfile
++import unittest
++from unittest.mock import patch
++
++ROOT = Path(__file__).resolve().parents[1]
++sys.path.insert(0, str(ROOT / 'tools/oot'))
++import update_graphics_4k as update
++from ocarina_playback_patch_test import authored_pe
++
++
++class GraphicsUpdateTests(unittest.TestCase):
++    def setUp(self):
++        self.temp = tempfile.TemporaryDirectory()
++        self.root = Path(self.temp.name) / '기존 설치 폴더'
++        self.bundle = Path(self.temp.name) / 'bundle'
++        self.bundle.mkdir()
++        base = Path(os.environ.get('OOT_KO2_BASE', ROOT.parent / 'graphics-installed-base'))
++        # Production payload, with its real baseline guard; the caller may provide another Korean baseline.
++        import make_graphics_4k_update as package
++        manifest = dict(files=[])
++        for rel in package.PAYLOAD:
++            before = base / rel
++            after = (ROOT / rel).read_bytes()
++            self.put_bundle('payload/' + rel, after)
++            manifest['files'].append(dict(path=rel, before=update.fingerprint(before.read_bytes()) if before.exists() else None,
++                                          after=update.fingerprint(after)))
++            if before.exists():
++                self.put(rel, before.read_bytes())
++        self.put_bundle('manifest.json', json.dumps(manifest).encode())
++        for rel in ('ferramentas/python/python.exe', 'ferramentas/bin/ninja.exe', 'ferramentas/llvm/bin/clang.exe',
++                    'tools/data/expected-oot111.json', 'generated/oot111/layout.json', 'build/exefs/main',
++                    'build/romfs/index.json'):
++            self.put(rel, b'authored-fixture')
++        self.put('runtime/ov_input.c', (base / 'runtime/ov_input.c').read_bytes())
++        self.put('generated/oot111/main/main_0087.c', (update.DYN_DT + '\nfp_op_s(c, FOP_DIV, 8, 1, 0); oot_dyn_dt(c);\n').encode())
++        import patch_generated as pg
++        self.put('generated/oot111/main/main_0098.c', (pg.FIXED_RES_V1 + '\n// authored anchors: oot_fixed_res() || oot_dynres_runs++; oot_fixed_res() ? oot_res_bits\n').encode())
++        self.put('jogar/jogar-ocarina.ps1', (base / 'jogar/jogar-ocarina.ps1').read_bytes())
++        self.ini = b'\xef\xbb\xbf[language]\r\nlang = ko\r\nmenu_lang = ko\r\n[display]\r\nfps_limit=60\r\nTOTK_FPS_LIMIT=144\r\nvk_dyn_a2c=0\r\n[controls]\r\npad_layout=xbox\r\n'
++        self.put('build/oot111/totk.ini', self.ini)
++        self.put('build/oot111/ocarina.exe', authored_pe(False))
++        self.put('build/oot111/obj/runtime/old.o', b'old object')
++        self.put('perfil/save.bin', b'unchanged save')
++
++    def tearDown(self):
++        self.temp.cleanup()
++
++    def put(self, rel, data):
++        p = self.root / rel
++        p.parent.mkdir(parents=True, exist_ok=True)
++        p.write_bytes(data)
++
++    def put_bundle(self, rel, data):
++        p = self.bundle / rel
++        p.parent.mkdir(parents=True, exist_ok=True)
++        p.write_bytes(data)
++
++    def built(self, root, log):
++        self.put('build/oot111/ocarina.exe', authored_pe(True))
++        self.put('build/oot111/modules.c', b'const int rt_oot_clock = 1;\n')
++        log.write_text('authored build success')
++
++    def test_success_and_idempotence(self):
++        with patch.object(update, 'build', side_effect=self.built) as compile:
++            result = update.apply(self.root, self.bundle)
++            self.assertEqual(result['status'], 'updated')
++            self.assertEqual(update.apply(self.root, self.bundle)['status'], 'already-current')
++            self.assertEqual(compile.call_count, 1)
++        self.assertEqual((self.root / 'perfil/save.bin').read_bytes(), b'unchanged save')
++        ini = (self.root / 'build/oot111/totk.ini').read_bytes()
++        self.assertIn(b'lang = ko\r\n', ini)
++        self.assertIn(b'vk_dyn_a2c=0\r\n', ini)
++        self.assertIn(b'pad_layout=xbox\r\n', ini)
++        self.assertIn(b'fps_limit=unlimited\r\nTOTK_FPS_LIMIT=unlimited', ini)
++        self.assertIn(b'oot_resolution = 4k', ini)
++        self.assertEqual((Path(result['backup']) / 'build/oot111/totk.ini').read_bytes(), self.ini)
++
++    def test_failure_restores_source_settings_exe_and_removes_new_files(self):
++        for failure in ('compile', 'host-table', 'metadata'):
++            before = {str(p.relative_to(self.root)): p.read_bytes() for p in self.root.rglob('*') if p.is_file()}
++            def fail(root, log):
++                self.built(root, log)
++                if failure == 'compile':
++                    raise ValueError('authored compiler failure')
++                if failure == 'host-table':
++                    self.put('build/oot111/ocarina.exe', authored_pe(False))
++                if failure == 'metadata':
++                    self.put('build/oot111/modules.c', b'no clock flag')
++            with patch.object(update, 'build', side_effect=fail):
++                with self.assertRaises(ValueError):
++                    update.apply(self.root, self.bundle)
++            for rel, data in before.items():
++                if rel.startswith('build/oot111/graphics-4k-backup/') or '/obj/' in rel or rel.endswith('.log'):
++                    continue
++                self.assertEqual((self.root / rel).read_bytes(), data, rel)
++            self.assertFalse((self.root / 'runtime/oot_render_policy.c').exists())
++            self.assertFalse((self.root / 'build/oot111/ocarina-graphics-4k-update.json').exists())
++
++    def test_unknown_source_rejected_without_changes(self):
++        p = self.root / 'runtime/frame_rate.c'
++        p.write_bytes(p.read_bytes() + b'\n// unknown local change\n')
++        before = p.read_bytes()
++        with self.assertRaisesRegex(ValueError, '덮어쓰지'):
++            update.apply(self.root, self.bundle)
++        self.assertEqual(p.read_bytes(), before)
++        self.assertEqual((self.root / 'build/oot111/totk.ini').read_bytes(), self.ini)
++        self.assertFalse((self.root / 'build/oot111/graphics-4k-backup').exists())
++
++    def test_crlf_and_recovery_launcher(self):
++        raw = (self.root / 'runtime/frame_rate.c').read_bytes()
++        self.put('runtime/frame_rate.c', update.normalized(raw).replace(b'\n', b'\r\n'))
++        path = self.root / 'jogar/jogar-ocarina.ps1'
++        safe = path.read_bytes().replace(b"TOTK_BIG_CS = '0'", b"TOTK_BIG_CS = '1'")
++        self.put('jogar/jogar-ocarina.ps1', safe)
++        with patch.object(update, 'build', side_effect=self.built):
++            self.assertEqual(update.apply(self.root, self.bundle)['status'], 'updated')
++        self.assertIn(b'\r\n', (self.root / 'runtime/frame_rate.c').read_bytes())
++        self.assertIn(b"$env:TOTK_BIG_CS = '1'", path.read_bytes())
++
++
++if __name__ == '__main__':
++    unittest.main()
+--- a/tests/native_exit_capture.cpp
++++ b/tests/native_exit_capture.cpp
+@@ -56,10 +56,10 @@
+     CHECK(capture.Observe(call,0)==ProgramCaptureState::Result::Continue);
+     CHECK(capture.Observe(exit_op(7,0),1)==ProgramCaptureState::Result::Continue);
+     // A conditional main EXIT must not set main_exited: this RET can return to
+-    // the still-live main path. Only the later unconditional EXIT arms the end.
++    // the still-live main path. The later unconditional EXIT completes capture
++    // because every forward call target has then already been scanned.
+     CHECK(capture.Observe(op(0x950),3)==ProgramCaptureState::Result::Continue);
+-    CHECK(capture.Observe(exit_op(),4)==ProgramCaptureState::Result::Continue);
+-    CHECK(capture.Observe(op(0x950),5)==ProgramCaptureState::Result::Complete);
++    CHECK(capture.Observe(exit_op(),4)==ProgramCaptureState::Result::Complete);
+ }
+ 
+ static void uniform_branch_boundary() {
+@@ -84,8 +84,45 @@
+     CHECK(moves==2);
+ }
+ 
++static void shader_register_pressure() {
++    for (u32 opcode : {0xc24U, 0x9a8U, 0xb6cU, 0xf6cU}) {
++        auto i=op(opcode);
++        bits(i,16,8,244); bits(i,24,8,28); bits(i,32,8,248); bits(i,64,8,248);
++        auto saved=PrepareRegisterPressure(i,244);
++        CHECK(saved.valid);
++        CHECK(!saved.prefix.empty() && saved.prefix.size()==saved.suffix.size());
++        CHECK(saved.instruction.Bits(16,8)<244);
++        if(opcode==0xc24) CHECK(saved.instruction.Bits(64,8)<244);
++        else CHECK(saved.instruction.Bits(32,8)<244);
++        if(opcode==0xb6c || opcode==0xf6c) {
++            CHECK(saved.instruction.Bits(64,8)<244);
++            bits(i,32,8,250); // Four gradient registers cannot cross an owned quartet.
++            CHECK(!PrepareRegisterPressure(i,244).valid);
++        }
++    }
++}
++
++static void multiple_gather_buffers() {
++    for(u32 offsets : {0U,1U,2U}) {
++        auto s2r=op(0x919);bits(s2r,16,8,16);
++        auto mov=op(0x202);bits(mov,16,8,17);bits(mov,32,8,16);bits(mov,72,4,15);
++        Instruction first{{0x06187b63U,0x30007c10,0x001e2f0eU,0}};
++        bits(first,76,2,offsets);
++        auto second=first;bits(second,54,5,1);
++        const std::vector<Instruction> code{s2r,mov,first,second,exit_op()};
++        auto lowered=LowerToMaxwell(code);
++        CHECK(bool(lowered));
++        if(!lowered) { std::fprintf(stderr,"gather failure: %.*s\n",(int)lowered.error.size(),lowered.error.data());continue; }
++        CHECK(lowered.required_texture_buffer==0);
++        unsigned bindless=0;
++        for(u64 i:lowered.instructions) bindless+=(i&0xffc0000000000000ULL)==0xdec0000000000000ULL;
++        CHECK(bindless==1);
++    }
++}
++
+ int main() {
+     predicate_matrix();pending_call_boundary();uniform_branch_boundary();per_tap_runtime_offsets();
++    shader_register_pressure();multiple_gather_buffers();
+     std::printf("native EXIT capture: %u checks, %u failures\n",checks,failures);
+     return failures?1:0;
+ }
+--- /dev/null
++++ b/tests/ounce_vibration_test.py
+@@ -0,0 +1,78 @@
++#!/usr/bin/env python3
++"""Exercise the actual HID mount handlers on authored controller handles, without a game or SDL."""
++import argparse
++from pathlib import Path
++import subprocess
++import tempfile
++
++ROOT = Path(__file__).resolve().parents[1]
++
++
++def main():
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument('--cc', default='clang')
++    args = parser.parse_args()
++    source = (ROOT / 'runtime/ov_input.c').read_text()
++    assert 'HOST_OVERRIDE("_ZN2nn3hid29IsOunceVibrationDeviceMountedERKNS0_21VibrationDeviceHandleE", ov_vib_mounted_ounce);' in source
++    assert 'HOST_OVERRIDE("_ZN2nn3hid6detail29IsOunceVibrationDeviceMountedEPbRKNS0_21VibrationDeviceHandleE", ov_vib_mounted);' in source
++    code = r'''
++#include <assert.h>
++#include <stdarg.h>
++#include <stdlib.h>
++#include <string.h>
++#include "host.h"
++// Do not retain unrelated handlers in this standalone executable; the code under test is included verbatim below.
++#undef HOST_OVERRIDE
++#define HOST_OVERRIDE(name, fn)
++#include "ov_input.c"
++static int handheld;
++int ov_handheld(void) { return handheld; }
++void rt_log(const char *format, ...) { (void)format; }
++void rt_fatal(const char *format, ...) { (void)format; abort(); }
++
++static void query(uint32_t handle, int expected) {
++    Cpu c; memset(&c, 0xa5, sizeof c);
++    c.x[0] = (uintptr_t)&handle;
++    Cpu before = c;
++    ov_vib_mounted_ounce(&c);
++    assert(c.x[0] == (uint64_t)expected);
++    before.x[0] = c.x[0];
++    assert(!memcmp(&before, &c, sizeof c));
++    uint8_t guarded[9]; memset(guarded, 0xa5, sizeof guarded);
++    c = before; c.x[0] = (uintptr_t)(guarded + 4); c.x[1] = (uintptr_t)&handle;
++    before = c;
++    ov_vib_mounted(&c);
++    assert(c.x[0] == 0); before.x[0] = 0;
++    assert(!memcmp(&before, &c, sizeof c));
++    for (unsigned i=0;i<sizeof guarded;i++) assert(guarded[i] == (i==4 ? expected : 0xa5));
++}
++int main(void) {
++    for (handheld=0;handheld<2;handheld++) {
++        for (unsigned style=0;style<9;style++) {
++            for (unsigned player=0;player<=32;player+=8) {
++                for (unsigned device=0;device<4;device++) {
++                    uint32_t handle=style | player<<8 | device<<16;
++                    int expected=style==(handheld?4:3) && player==(handheld?32:0) && device<2;
++                    query(handle,expected);
++                }
++            }
++        }
++    }
++    handheld=0;
++    for (int i=0;i<1000;i++) { query(3,1);query(0x10003,1);query(0x20003,0); }
++    puts("PASS: real Ounce public bool / detail Result+one-byte output; docked/handheld, both motors, invalid handles, register guards, repeated playback queries");
++}
++'''
++    with tempfile.TemporaryDirectory() as temp:
++        folder = Path(temp)
++        test = folder / 'test.c'
++        test.write_text(code)
++        exe = folder / 'test'
++        subprocess.run([args.cc, '-std=gnu11', '-O2', '-Wall', '-Wextra', '-Werror',
++                        '-Wno-unused-function', '-Wno-unused-variable', '-ffunction-sections', '-fdata-sections',
++                        '-I', str(ROOT / 'runtime'), str(test), '-Wl,--gc-sections', '-lm', '-o', str(exe)], check=True)
++        subprocess.run([str(exe)], check=True)
++
++
++if __name__ == '__main__':
++    main()
+--- /dev/null
++++ b/tests/ocarina_playback_patch_test.py
+@@ -0,0 +1,116 @@
++#!/usr/bin/env python3
++"""Authored PE records and temporary install fixtures: no game executables, saves or generated game code."""
++import importlib.util
++from pathlib import Path
++import struct
++import subprocess
++import tempfile
++import unittest
++from unittest.mock import patch
++
++ROOT = Path(__file__).resolve().parents[1]
++spec = importlib.util.spec_from_file_location('playback_fix', ROOT / 'tools/oot/fix_ocarina_playback.py')
++fix = importlib.util.module_from_spec(spec)
++spec.loader.exec_module(fix)
++
++
++def authored_pe(hooks=True, broken_alias=False):
++    raw = bytearray(0xc00)
++    def word(offset, value): struct.pack_into('<H', raw, offset, value)
++    def dword(offset, value): struct.pack_into('<I', raw, offset, value)
++    def qword(offset, value): struct.pack_into('<Q', raw, offset, value)
++    raw[:2] = b'MZ'; dword(0x3c, 0x80); raw[0x80:0x84] = b'PE\0\0'
++    word(0x84, 0x8664); word(0x86, 3); word(0x94, 0xf0)
++    word(0x98, 0x20b); qword(0xb0, 0x140000000)
++    for index, (name, rva, offset) in enumerate([(b'.text', 0x1000, 0x400), (b'.ovr', 0x2000, 0x600), (b'.rdata', 0x3000, 0x800)]):
++        pos = 0x188 + 40 * index
++        raw[pos:pos + len(name)] = name; dword(pos + 8, 0x200); dword(pos + 12, rva)
++        dword(pos + 16, 0x200); dword(pos + 20, offset)
++    string = 0x800
++    for index, symbol in enumerate((fix.LEGACY, fix.PUBLIC, fix.DETAIL)):
++        data = symbol.encode() + b'\0'
++        raw[string:string + len(data)] = data
++        if hooks or index == 0:
++            qword(0x600 + index * 16, 0x140003000 + string - 0x800)
++            qword(0x608 + index * 16, 0x140001000 + (16 if index == 1 or index == 2 and broken_alias else 0))
++        string += len(data)
++    return bytes(raw)
++
++
++class PlaybackFixTests(unittest.TestCase):
++    def setUp(self):
++        self.temp = tempfile.TemporaryDirectory()
++        self.root = Path(self.temp.name) / '기존 설치 폴더'
++        current = (ROOT / 'runtime/ov_input.c').read_bytes()
++        self.original = current.replace(fix.BODY.encode(), b'').replace(b'\n' + fix.BINDINGS.encode(), b'')
++        self.fixed = current
++
++    def tearDown(self):
++        self.temp.cleanup()
++
++    def fixture(self):
++        files = ['runtime/ov_input.c', 'runtime/host.h', 'build/oot111/ocarina.exe',
++                 'ferramentas/python/python.exe', 'ferramentas/bin/ninja.exe', 'ferramentas/llvm/bin/clang.exe',
++                 'tools/build_game.py', 'tools/data/expected-oot111.json', 'generated/oot111/layout.json',
++                 'build/exefs/main', 'build/romfs/index.json', 'build/oot111/obj/runtime/ov_input.o']
++        for name in files:
++            path = self.root / name; path.parent.mkdir(parents=True, exist_ok=True); path.write_bytes(b'authored fixture')
++        (self.root / 'runtime/ov_input.c').write_bytes(self.original)
++        (self.root / 'build/oot111/ocarina.exe').write_bytes(authored_pe(False))
++        for name in ['build/oot111/totk.ini', 'perfil/save/fixture/progress.sav']:
++            path = self.root / name; path.parent.mkdir(parents=True, exist_ok=True); path.write_bytes(b'untouched authored sentinel')
++
++    def test_source_patch_preserves_every_other_byte_and_line_endings(self):
++        for newline in (b'\n', b'\r\n'):
++            original = self.original.replace(b'\n', newline)
++            fixed = self.fixed.replace(b'\n', newline)
++            self.assertEqual(fix.patched_source(original), fixed)
++            self.assertEqual(fix.patched_source(fixed), fixed)
++
++    def test_unknown_duplicate_or_partial_sources_are_rejected(self):
++        for raw in [b'unknown', self.original + fix.OLD_BINDING.encode(), self.original + fix.PUBLIC.encode()]:
++            with self.assertRaises(ValueError): fix.patched_source(raw)
++
++    def test_linked_host_entries_required_not_just_strings(self):
++        exe = Path(self.temp.name) / 'fixture.exe'
++        for raw, valid in [(authored_pe(), True), (authored_pe(False), False), (authored_pe(True, True), False), (b'MZ', False)]:
++            exe.write_bytes(raw)
++            if valid: self.assertEqual(set(fix.linked_hooks(exe)), {fix.PUBLIC, fix.DETAIL, fix.LEGACY})
++            else:
++                with self.assertRaises(ValueError): fix.linked_hooks(exe)
++
++    def test_success_backup_targeted_rebuild_and_idempotence(self):
++        self.fixture()
++        def build(command, **kwargs):
++            self.assertEqual(kwargs['cwd'], self.root)
++            self.assertIn('--jobs', command)
++            self.assertFalse((self.root / 'build/oot111/obj/runtime/ov_input.o').exists())
++            (self.root / 'build/oot111/ocarina.exe').write_bytes(authored_pe())
++            return subprocess.CompletedProcess(command, 0)
++        with patch.object(fix.subprocess, 'run', side_effect=build) as run:
++            result = fix.apply(self.root)
++            self.assertEqual(result['status'], 'fixed')
++            self.assertEqual(fix.apply(self.root)['status'], 'already_fixed')
++            self.assertEqual(run.call_count, 1)
++        backup = Path(result['backup'])
++        self.assertEqual((backup / 'ov_input.c').read_bytes(), self.original)
++        self.assertEqual((backup / 'ocarina.exe').read_bytes(), authored_pe(False))
++        for name in ['build/oot111/totk.ini', 'perfil/save/fixture/progress.sav']:
++            self.assertEqual((self.root / name).read_bytes(), b'untouched authored sentinel')
++
++    def test_build_or_link_verification_failure_rolls_back(self):
++        for bad_link in (False, True):
++            self.fixture()
++            def fail(command, **kwargs):
++                (self.root / 'build/oot111/ocarina.exe').write_bytes(authored_pe(False) if bad_link else b'partial link')
++                (self.root / 'build/oot111/obj/runtime/ov_input.o').write_bytes(b'new runtime object')
++                return subprocess.CompletedProcess(command, 0 if bad_link else 1)
++            with patch.object(fix.subprocess, 'run', side_effect=fail):
++                with self.assertRaises(ValueError): fix.apply(self.root)
++            self.assertEqual((self.root / 'runtime/ov_input.c').read_bytes(), self.original)
++            self.assertEqual((self.root / 'build/oot111/ocarina.exe').read_bytes(), authored_pe(False))
++            self.assertEqual((self.root / 'build/oot111/obj/runtime/ov_input.o').read_bytes(), b'authored fixture')
++
++
++if __name__ == '__main__':
++    unittest.main()
+--- a/runtime/ov_input.c
++++ b/runtime/ov_input.c
+@@ -391,6 +391,16 @@
+     if (!out) rt_fatal("nn::hid::detail::IsVibrationDeviceMounted: null output");
+     *out = vibration_side(arg_p(c, 1), "IsVibrationDeviceMounted") >= 0;
+     ret_x(c, 0);
++}
++
++// Switch 2's mount query uses the same host channel mapping as the existing vibration query.
++// Ocarina asks this while starting controller-driven playback; its SDK otherwise opens the unimplemented hid service.
++// Behavior reference: seedds/nxnative dm/host/hle_hid.c, blob 8e280577c6c1851524e2b2fc4797d8664de09dcb.
++static void ov_vib_mounted_ounce(Cpu *c) {
++    const uint32_t *h = need_handle(arg_p(c, 0), "IsOunceVibrationDeviceMounted");
++    static volatile int32_t asked;
++    once(&asked, "hid: Ounce vibration mount query handled by host (device %#x)", *h);
++    ret_x(c, vibration_side(h, "IsOunceVibrationDeviceMounted") >= 0);
+ }
+ 
+ // Result detail::IsVibrationPermitted(bool *out)
+@@ -547,6 +557,8 @@
+ HOST_OVERRIDE("_ZN2nn3hid6detail22GetVibrationDeviceInfoEPNS0_19VibrationDeviceInfoERKNS0_21VibrationDeviceHandleE",
+               ov_vib_info);
+ HOST_OVERRIDE("_ZN2nn3hid6detail24IsVibrationDeviceMountedEPbRKNS0_21VibrationDeviceHandleE", ov_vib_mounted);
++HOST_OVERRIDE("_ZN2nn3hid29IsOunceVibrationDeviceMountedERKNS0_21VibrationDeviceHandleE", ov_vib_mounted_ounce);
++HOST_OVERRIDE("_ZN2nn3hid6detail29IsOunceVibrationDeviceMountedEPbRKNS0_21VibrationDeviceHandleE", ov_vib_mounted);
+ HOST_OVERRIDE("_ZN2nn3hid6detail20IsVibrationPermittedEPb", ov_vib_permitted);
+ HOST_OVERRIDE("_ZN2nn3hid6detail15PermitVibrationEb", ov_vib_permit);
+ HOST_OVERRIDE("_ZN2nn3hid6detail18StartSixAxisSensorERKNS0_19SixAxisSensorHandleE", ov_six_start);
+--- a/THIRD_PARTY_NOTICES.md
++++ b/THIRD_PARTY_NOTICES.md
+@@ -4,6 +4,7 @@
+ 
+ | Component | Source and commit | License | Used in |
+ |---|---|---|---|
++| Lichii mixed-buffer texture gather and TXD/ATOMG/uniform-IMAD register-pressure corrections | https://github.com/zortos293/Lichii @ `bf4c42e223d4812d4456d3d8f66d892571d19a13`, Copyright 2026 Eden Emulator Project | GPL-3.0-or-later | `runtime/third_party/eglantine/shader_recompiler/frontend/ampere/lower_to_maxwell.h`, `register_pressure.h`; merged while retaining this port's FSEL, final-return and dynamic per-tap offset handling |
+ | Eglantine Ampere (SM86) to Maxwell shader lowering and program capture | https://git.eden-emu.dev/Franseven/PokeDinner-a-Eglantine-Fork @ `1dd40d8` (full hash in `runtime/third_party/eglantine/UPSTREAM_COMMIT`; `src/shader_recompiler/frontend/ampere/lower_to_maxwell.h`, `program_capture.h`), Copyright 2026 Eden Emulator Project; encoding reference Mesa NAK `sm70_encode.rs` (MIT, Copyright 2022 Collabora, Ltd.) | GPL-3.0-or-later | `runtime/third_party/eglantine/` (unmodified), `tools/dkb_lower_test.cpp`; the reason DKB Recomp is GPL-3.0-or-later |
+ | Eglantine compact software HMMA (the pseudo instruction the lowering emits with `tensor`, decoded to one shared warp-shuffle helper per K instead of an inline expansion) | https://github.com/Djihads80/Eglantine @ `e88024e6b01a700330404c455d3c909bcce226fe` (`src/shader_recompiler/frontend/maxwell/translate/impl/tensor_mul_add.cpp`, `backend/spirv/emit_spirv_tensor.cpp`), Copyright 2026 Eden Emulator Project; the helper repeats the arithmetic of the inline expansion in `lower_to_maxwell.h` (case 0x23c) | GPL-3.0-or-later | `tools/xlate/patches/0036-compact-half-matrix-multiply.patch` (ported to the Ryujinx translator, not copied) |
+ | Hookshot fixed resolution for Ocarina of Time 1.1.1: the dynamic-resolution branch (flag +0x94, fixed path and its 1.0 scale), the 30 dynamic frames before the fixed path | https://github.com/NotRexed/Hookshot @ `c02f290d47ff89d87ac444f32c0e8a39943a1c41` (`nx2/oot_patches.py`, `host/nn_vi.c`, pull request 102), NotRexed and contributors (the files carry no copyright line) | GPL-3.0 | `tools/oot/patch_generated.py` (FIXED_RES) |
+--- /dev/null
++++ b/docs/oot-graphics-fps-4k.md
+@@ -0,0 +1,51 @@
++# 오카리나 그래픽 · FPS · 내부 4K 업데이트 v1
++
++게임을 종료하고 `Ocarina_Graphics_FPS_4K_Update.exe`를 실행한 뒤 **기존 OcarinaRecomp 설치 폴더**를 선택하세요.
++`ferramentas`, `runtime`, `generated`, `build` 폴더가 들어 있는 상위 폴더입니다.
++NUP를 다시 선택하거나 처음부터 재설치할 필요가 없습니다. 저장 파일과 한국어, 컨트롤러 설정은 유지합니다.
++설치된 컴파일러로 런타임과 해상도 코드 한 묶음을 다시 빌드하므로 몇 분 걸릴 수 있습니다.
++
++이 파일은 게임 실행 파일을 포함하지 않는 소스 업데이트 도구입니다. 기존 한국어 ko2 포트가 필요합니다.
++알 수 없는 소스 수정이 있으면 덮어쓰지 않고 중단합니다.
++
++## 적용 내용
++
++- 최신 리치 소스에서 텍스처 미분·원자 연산의 임시 레지스터 보존과 두 번째 텍스처 버퍼의 gather 처리를 반영합니다.
++- 기존 포트의 링크·EXIT·FSEL·가변 gather 수정과 컨트롤러 오카리나 연주용 진동 조회 수정을 유지합니다.
++- 셰이더를 읽을 때 EXIT의 두 조건을 모두 검사하여 조건부 종료 뒤의 코드가 잘리지 않도록 합니다.
++- 오카리나의 기존 실시간 시간 간격 처리가 있는 빌드에서 호스트의 60Hz 프레임 대기를 해제합니다.
++- 메뉴에 240·300 FPS와 **제한 없음**을 추가합니다. 기본 적용값은 제한 없음입니다.
++- 내부 3D 해상도 메뉴에 **4K (3840×2160)**를 추가하고 선택합니다. 창 해상도 확대와 별개입니다.
++- 실제 NVN 출력 텍스처 크기에 맞춰 게임 내부 렌더링 배율을 계산합니다. 초기 30프레임의 동적 해상도 초기화는 유지합니다.
++- 추가 색 보정을 기본값으로 되돌리고, 호스트의 추가 선명화를 끕니다. 기존 검은 화면을 유발했던 Upscaler Test 경로는 안전한 대체 경로를 사용합니다.
++
++## 확인 및 변경
++
++게임 메뉴의 화면 설정에서 내부 3D 해상도와 FPS 제한을 바꿀 수 있습니다.
++4K가 무거우면 내부 해상도를 **100 %** 또는 **게임 자동 해상도**로 낮추세요.
++프레임을 제한하려면 60·120·144·240·300 등을 선택하세요. 화면 동기화 방식은 mailbox이며, 지원하지 않는 드라이버는 VSync로 돌아갈 수 있습니다.
++
++기존 진단 바로가기로 실행하면 로그에 실제 측정 FPS가 기록됩니다.
++렌더러가 실제 3840×2160 색상·깊이 렌더 패스를 관측했을 때만 다음 줄이 출력됩니다.
++`resolution: observed 3840x2160 color/depth render pass (internal 4K target)`
++이는 해당 크기의 렌더 패스를 확인하는 진단이며 모든 장면·후처리의 4K 품질을 보장하는 표시는 아닙니다.
++
++**실제 게임의 그래픽, 오카리나 연주, 내부 4K 화면과 300FPS 달성은 검증 전입니다.**
++FPS 제한 해제는 300FPS 성능 보장을 뜻하지 않습니다. GPU·CPU·드라이버·장면 부하에 따라 달라집니다.
++리치의 전체 렌더러나 DLSS를 이식한 빌드는 아닙니다. 고프레임 게임 로직과 4K 메모리 사용은 실험적입니다.
++
++## 백업
++
++변경 전 실행 파일·소스·설정은 `build/oot111/graphics-4k-backup/날짜/`에 보관합니다.
++컴파일 또는 실행 파일 연결 검사 실패 시 변경 파일과 기존 실행 파일을 자동 복원합니다.
++빌드 로그는 `build/oot111/ocarina-graphics-4k-build.log`입니다.
++
++## 소스와 기준
++
++- Ocarina Recomp: https://github.com/sostenesfreitas/ocarina-recomp/tree/fe7a9399a6daa5a789e7557e5a193db8f3055c2a (0.2.6)
++- Lichii: https://github.com/zortos293/Lichii/tree/bf4c42e223d4812d4456d3d8f66d892571d19a13
++- 한국어 포트 및 업데이트 소스: https://github.com/jinju151203/Lichii/tree/codex/oot-korean-native/native-oot-korean
++
++압축 파일의 `payload/`에는 변경 소스가, `source/`에는 업데이트 도구와 검증 코드가 있습니다.
++원본 프로젝트와 Eglantine/Lichii 코드의 GPL-3.0-or-later 및 THIRD_PARTY_NOTICES를 따릅니다.
++게임 데이터, 생성된 게임 C, 저장 파일과 개인 로그는 포함하지 않습니다.
+--- /dev/null
++++ b/tools/oot/update_graphics_4k.py
+@@ -0,0 +1,230 @@
++#!/usr/bin/env python3
++"""Transactional source update for an existing owned-game Ocarina native installation."""
++from __future__ import annotations
++import argparse
++from datetime import datetime, timezone
++import hashlib
++import json
++import os
++from pathlib import Path
++import re
++import shutil
++import subprocess
++import sys
++import uuid
++
++from fix_ocarina_playback import atomic_bytes, digest, linked_hooks, patched_source, safe_file
++from patch_generated import DYN_DT, FIXED_RES, upgrade_fixed_resolution
++
++UPDATE_ID = 'oot-graphics-fps-internal4k-v1'
++SETTINGS = dict(fps_limit='unlimited', oot_resolution='4k', vk_present='mailbox',
++                upscaler='bilinear', sharpness='0', color_preset='default', color_brightness='0',
++                color_contrast='100', color_saturation='100', color_gamma='1', perf_overlay='fps')
++
++
++def normalized(raw: bytes) -> bytes:
++    return raw.replace(b'\r\n', b'\n')
++
++
++def fingerprint(raw: bytes) -> str:
++    return hashlib.sha256(normalized(raw)).hexdigest()
++
++
++def config_update(raw: bytes) -> bytes:
++    bom = b'\xef\xbb\xbf' if raw.startswith(b'\xef\xbb\xbf') else b''
++    text = raw[len(bom):].decode('utf-8')
++    newline = '\r\n' if '\r\n' in text else '\n'
++    seen = set()
++    out = []
++    for line in text.splitlines(keepends=True):
++        m = re.match(r'^([ \t]*(?:TOTK_)?([a-z0-9_]+)[ \t]*=[ \t]*)([^\r\n]*)(\r?\n)?$', line, re.I)
++        if m and m[2].lower() in SETTINGS:
++            key = m[2].lower()
++            seen.add(key)
++            line = m[1] + SETTINGS[key] + (m[4] or '')
++        out.append(line)
++    text = ''.join(out)
++    missing = [key for key in SETTINGS if key not in seen]
++    if missing:
++        if text and not text.endswith('\n'):
++            text += newline
++        text += newline + '[display]' + newline
++        text += ''.join(f'{key} = {SETTINGS[key]}' + newline for key in missing)
++    return bom + text.encode('utf-8')
++
++
++def launcher_update(raw: bytes) -> bytes:
++    # The obsolete Upscaler Test shortcut must not re-enable the path that blackened the user's scene.
++    text = raw.decode('utf-8-sig')
++    newline = '\r\n' if '\r\n' in text else '\n'
++    text = text.replace('\r\n', '\n')
++    marker = '# Ocarina graphics/fps/4k v1: safe compute fallback and authored real-time clock.'
++    if marker in text:
++        return raw
++    anchor = '$game = Start-Process .\\ocarina.exe'
++    if text.count(anchor) != 1:
++        raise ValueError('지원되는 기존 실행 스크립트가 아닙니다. 설치 파일을 변경하지 않았습니다.')
++    text = text.replace(anchor, marker + "\n$env:TOTK_BIG_CS = '1'\n$env:OOT_DYN_DT = '1'\n" + anchor)
++    return b'\xef\xbb\xbf' + text.replace('\n', newline).encode('utf-8')
++
++
++def target_path(root: Path, rel: str, required=True) -> Path:
++    path = root / rel
++    if path.exists():
++        safe_file(path)
++    else:
++        if required:
++            raise ValueError('기존 설치에 필요한 파일이 없습니다: ' + rel)
++        for parent in (path.parent, *path.parents):
++            if parent.exists() and (parent.is_symlink() or
++                getattr(parent.lstat(), 'st_file_attributes', 0) & 0x400):
++                raise ValueError('연결된 폴더는 변경하지 않습니다: ' + str(parent))
++    return path
++
++
++def plan(root: Path, bundle: Path) -> dict[str, bytes]:
++    manifest = json.loads((bundle / 'manifest.json').read_text())
++    changes = {}
++    for entry in manifest['files']:
++        rel = entry['path']
++        if rel.startswith('/') or '..' in Path(rel).parts:
++            raise ValueError('Invalid update payload path')
++        source = bundle / 'payload' / rel
++        data = source.read_bytes()
++        if fingerprint(data) != entry['after']:
++            raise ValueError('업데이트 압축 파일 검사에 실패했습니다: ' + rel)
++        path = target_path(root, rel, required=entry['before'] is not None)
++        old = path.read_bytes() if path.exists() else None
++        if old is not None and fingerprint(old) == entry['after']:
++            continue
++        if (old is not None and fingerprint(old) != entry['before']) or (old is None and entry['before'] is not None):
++            raise ValueError('지원 버전과 다른 수정이 있습니다. 덮어쓰지 않았습니다: ' + rel)
++        if old is not None and b'\r\n' in old:
++            data = normalized(data).replace(b'\n', b'\r\n')
++        changes[rel] = data
++    source = target_path(root, 'runtime/ov_input.c')
++    changes['runtime/ov_input.c'] = patched_source(source.read_bytes())
++    clock = target_path(root, 'generated/oot111/main/main_0087.c').read_bytes().decode('utf-8')
++    if DYN_DT not in clock.replace('\r\n', '\n') or 'fp_op_s(c, FOP_DIV, 8, 1, 0); oot_dyn_dt(c);' not in clock:
++        raise ValueError('기존 오카리나 실시간 처리 코드를 확인하지 못했습니다. FPS 제한을 해제하지 않았습니다.')
++    generated = target_path(root, 'generated/oot111/main/main_0098.c').read_bytes()
++    text = generated.decode('utf-8').replace('\r\n', '\n')
++    for hook in ('oot_fixed_res() ||', 'oot_dynres_runs++;', 'oot_fixed_res() ? oot_res_bits'):
++        if hook not in text:
++            raise ValueError('기존 해상도 처리 코드를 확인하지 못했습니다. 게임 코드를 변경하지 않았습니다.')
++    upgraded = upgrade_fixed_resolution(text)
++    changes['generated/oot111/main/main_0098.c'] = upgraded.replace('\n', '\r\n' if b'\r\n' in generated else '\n').encode()
++    ini = target_path(root, 'build/oot111/totk.ini', required=False)
++    changes['build/oot111/totk.ini'] = config_update(ini.read_bytes() if ini.exists() else b'')
++    launcher = target_path(root, 'jogar/jogar-ocarina.ps1')
++    changes['jogar/jogar-ocarina.ps1'] = launcher_update(launcher.read_bytes())
++    return {rel: data for rel, data in changes.items() if not (root / rel).exists() or (root / rel).read_bytes() != data}
++
++
++def build_command(root: Path):
++    return [str(root / 'ferramentas/python/python.exe'), 'tools/build_game.py', '--version', 'oot111',
++            '--gen', 'generated/oot111', '--out', str(root / 'build/oot111'),
++            '--expected', 'tools/data/expected-oot111.json', '--exefs', str(root / 'build/exefs'),
++            '--romfs', str(root / 'build/romfs'), '--jobs', '2', '--toolchain', str(root / 'ferramentas/llvm'),
++            '--deps', str(root / 'ferramentas/deps'), '--ninja', str(root / 'ferramentas/bin/ninja.exe')]
++
++
++def build(root: Path, log: Path):
++    env = dict(os.environ, PYTHONUTF8='1', PYTHONUNBUFFERED='1')
++    env['PATH'] = os.pathsep.join([str(root / 'ferramentas/llvm/bin'), str(root / 'ferramentas/bin'),
++                                  str(root / 'ferramentas/deps/bin'), env.get('PATH', '')])
++    with log.open('wb') as output:
++        result = subprocess.run(build_command(root), cwd=root, env=env, stdout=output, stderr=subprocess.STDOUT,
++                                creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
++    if result.returncode:
++        raise ValueError(f'로컬 컴파일에 실패했습니다. 기존 실행 파일을 복원합니다. 로그: {log}')
++
++
++def invalidate(root: Path):
++    obj = root / 'build/oot111/obj'
++    # Runtime headers affect several menu translation units; never reuse a mixed enum/object build.
++    if (obj / 'runtime').is_dir():
++        for path in (obj / 'runtime').rglob('*.o'):
++            safe_file(path)
++            path.unlink()
++    chunk = obj / 'main/main_0098.o'
++    if chunk.exists():
++        safe_file(chunk)
++        chunk.unlink()
++
++
++def apply(root: Path, bundle: Path) -> dict:
++    root = root.absolute()
++    for rel in ('build/oot111/ocarina.exe', 'ferramentas/python/python.exe', 'ferramentas/bin/ninja.exe',
++                'ferramentas/llvm/bin/clang.exe', 'tools/data/expected-oot111.json', 'generated/oot111/layout.json',
++                'build/exefs/main', 'build/romfs/index.json'):
++        target_path(root, rel)
++    changes = plan(root, bundle)
++    out = root / 'build/oot111'
++    exe = out / 'ocarina.exe'
++    receipt = out / 'ocarina-graphics-4k-update.json'
++    if not changes and receipt.is_file() and json.loads(receipt.read_text()).get('exe_sha256') == digest(exe):
++        linked_hooks(exe)
++        return dict(status='already-current', message='이 업데이트가 이미 적용되어 있습니다.', game_exe=str(exe))
++    stamp = datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ') + '-' + uuid.uuid4().hex[:8]
++    backup = out / 'graphics-4k-backup' / stamp
++    backup.mkdir(parents=True)
++    saved = dict(changes)
++    # Installer-authored build files also change during compilation; retain them for a complete rollback.
++    for rel in ('build/oot111/ocarina.exe', 'build/oot111/modules.c', 'build/oot111/build.ninja',
++                'build/oot111/obj/objects.sha256', 'build/oot111/ocarina-graphics-4k-update.json'):
++        target_path(root, rel, required=False)
++        saved.setdefault(rel, b'')
++    existed = []
++    for rel in saved:
++        path = root / rel
++        if path.exists():
++            dest = backup / rel
++            dest.parent.mkdir(parents=True, exist_ok=True)
++            shutil.copy2(path, dest)
++            existed.append(rel)
++    atomic_bytes(backup / 'backup.json', json.dumps(dict(update=UPDATE_ID, files=list(saved), existed=existed), indent=2).encode())
++    log = out / 'ocarina-graphics-4k-build.log'
++    try:
++        for rel, data in changes.items():
++            path = root / rel
++            path.parent.mkdir(parents=True, exist_ok=True)
++            atomic_bytes(path, data)
++        invalidate(root)
++        build(root, log)
++        hooks = linked_hooks(exe)
++        if 'const int rt_oot_clock = 1;' not in (out / 'modules.c').read_text():
++            raise ValueError('실행 파일 빌드의 오카리나 실시간 처리 표시를 확인하지 못했습니다.')
++        record = dict(update=UPDATE_ID, installed_at=datetime.now(timezone.utc).isoformat(), backup=str(backup),
++                      exe_sha256=digest(exe), changed_files=list(changes), verified_host_symbols=sorted(hooks),
++                      settings=SETTINGS, gameplay_verified=False, actual_4k_verified=False, actual_300fps_verified=False)
++        atomic_bytes(receipt, json.dumps(record, ensure_ascii=False, indent=2).encode())
++        return dict(status='updated', game_exe=str(exe), backup=str(backup), build_log=str(log),
++                    message='그래픽 수정·FPS 제한 해제·내부 4K 모드 빌드를 완료했습니다. 실제 게임 화면과 성능은 확인이 필요합니다.')
++    except BaseException:
++        for rel in saved:
++            path = root / rel
++            if rel in existed:
++                path.parent.mkdir(parents=True, exist_ok=True)
++                atomic_bytes(path, (backup / rel).read_bytes())
++            elif path.exists():
++                path.unlink()
++        invalidate(root)
++        raise
++
++
++def main():
++    ap = argparse.ArgumentParser(description=__doc__)
++    ap.add_argument('--root', type=Path, required=True)
++    ap.add_argument('--bundle', type=Path, default=Path(__file__).resolve().parent)
++    args = ap.parse_args()
++    try:
++        print(json.dumps(apply(args.root, args.bundle), ensure_ascii=True))
++        return 0
++    except (OSError, ValueError) as error:
++        print(json.dumps(dict(error=str(error)), ensure_ascii=True))
++        return 1
++
++
++if __name__ == '__main__':
++    raise SystemExit(main())
+--- /dev/null
++++ b/tools/oot/fix_ocarina_playback.py
+@@ -0,0 +1,208 @@
++#!/usr/bin/env python3
++"""Install the Ounce vibration query fix into an existing owned-game build, then verify the linked host table."""
++from __future__ import annotations
++import argparse
++from datetime import datetime, timezone
++import hashlib
++import json
++import os
++from pathlib import Path
++import shutil
++import stat
++import struct
++import subprocess
++import tempfile
++
++FIX_ID = 'ocarina-controller-playback-hid-v1'
++PUBLIC = '_ZN2nn3hid29IsOunceVibrationDeviceMountedERKNS0_21VibrationDeviceHandleE'
++DETAIL = '_ZN2nn3hid6detail29IsOunceVibrationDeviceMountedEPbRKNS0_21VibrationDeviceHandleE'
++LEGACY = '_ZN2nn3hid6detail24IsVibrationDeviceMountedEPbRKNS0_21VibrationDeviceHandleE'
++ANCHOR = '// Result detail::IsVibrationPermitted(bool *out)'
++BODY = '''// Switch 2's mount query uses the same host channel mapping as the existing vibration query.
++// Ocarina asks this while starting controller-driven playback; its SDK otherwise opens the unimplemented hid service.
++// Behavior reference: seedds/nxnative dm/host/hle_hid.c, blob 8e280577c6c1851524e2b2fc4797d8664de09dcb.
++static void ov_vib_mounted_ounce(Cpu *c) {
++    const uint32_t *h = need_handle(arg_p(c, 0), "IsOunceVibrationDeviceMounted");
++    static volatile int32_t asked;
++    once(&asked, "hid: Ounce vibration mount query handled by host (device %#x)", *h);
++    ret_x(c, vibration_side(h, "IsOunceVibrationDeviceMounted") >= 0);
++}
++
++'''
++BINDINGS = f'HOST_OVERRIDE("{PUBLIC}", ov_vib_mounted_ounce);\nHOST_OVERRIDE("{DETAIL}", ov_vib_mounted);'
++OLD_BINDING = f'HOST_OVERRIDE("{LEGACY}", ov_vib_mounted);'
++
++
++def patched_source(raw: bytes) -> bytes:
++    text = raw.decode('utf-8')
++    newline = '\r\n' if '\r\n' in text else '\n'
++    body, bindings = BODY.replace('\n', newline), BINDINGS.replace('\n', newline)
++    if body in text and bindings in text:
++        return raw
++    if PUBLIC in text or DETAIL in text or 'ov_vib_mounted_ounce' in text:
++        raise ValueError('다른 Ounce 진동 패치가 이미 있습니다. 기존 코드를 덮어쓰지 않았습니다.')
++    if text.count(ANCHOR) != 1 or text.count(OLD_BINDING) != 1:
++        raise ValueError('이 수정이 지원하는 ov_input.c 형식과 다릅니다. 기존 코드를 덮어쓰지 않았습니다.')
++    return text.replace(ANCHOR, body + ANCHOR).replace(OLD_BINDING, OLD_BINDING + newline + bindings).encode('utf-8')
++
++
++def digest(path: Path) -> str:
++    with path.open('rb') as stream:
++        return hashlib.file_digest(stream, 'sha256').hexdigest()
++
++
++def linked_hooks(path: Path) -> dict[str, int]:
++    """Read actual x64 PE HOST_OVERRIDE entries, not just strings that might occur elsewhere."""
++    if path.stat().st_size > 1024 * 1024 * 1024:
++        raise ValueError('실행 파일이 예상 크기를 넘습니다.')
++    raw = path.read_bytes()
++    try:
++        u16 = lambda p: struct.unpack_from('<H', raw, p)[0]
++        u32 = lambda p: struct.unpack_from('<I', raw, p)[0]
++        u64 = lambda p: struct.unpack_from('<Q', raw, p)[0]
++        pe = u32(0x3c)
++        if raw[:2] != b'MZ' or raw[pe:pe + 4] != b'PE\0\0' or u16(pe + 4) != 0x8664:
++            raise ValueError('Windows x64 실행 파일이 아닙니다.')
++        opt = pe + 24
++        if u16(opt) != 0x20b:
++            raise ValueError('PE32+ 실행 파일이 아닙니다.')
++        image_base = u64(opt + 24)
++        sections = []
++        first = opt + u16(pe + 20)
++        for i in range(u16(pe + 6)):
++            p = first + 40 * i
++            name = raw[p:p + 8].split(b'\0')[0]
++            sections.append((name, u32(p + 12), u32(p + 16), u32(p + 20)))
++        def file_offset(va):
++            rva = va - image_base
++            for _, start, size, offset in sections:
++                if start <= rva < start + size:
++                    return offset + rva - start
++            return None
++        hooks = {}
++        for name, _, size, offset in sections:
++            if not name.startswith(b'.ovr') or offset + size > len(raw):
++                continue
++            for p in range(offset, offset + size - 15, 16):
++                name_offset, fn = file_offset(u64(p)), u64(p + 8)
++                if name_offset is None or file_offset(fn) is None:
++                    continue
++                end = raw.find(b'\0', name_offset, name_offset + 256)
++                if end < 0:
++                    continue
++                symbol = raw[name_offset:end].decode('ascii', errors='replace')
++                if symbol in (PUBLIC, DETAIL, LEGACY):
++                    if symbol in hooks:
++                        raise ValueError('중복된 진동 함수 연결이 있습니다.')
++                    hooks[symbol] = fn
++        if set(hooks) != {PUBLIC, DETAIL, LEGACY} or hooks[DETAIL] != hooks[LEGACY]:
++            raise ValueError('오카리나 연주 수정 함수가 실행 파일에 연결되지 않았습니다.')
++        return hooks
++    except (struct.error, IndexError) as error:
++        raise ValueError('실행 파일의 PE 구조를 읽지 못했습니다.') from error
++
++
++def safe_file(path: Path) -> None:
++    for item in (path, *path.parents):
++        info = item.lstat()
++        if item.is_symlink() or getattr(info, 'st_file_attributes', 0) & getattr(stat, 'FILE_ATTRIBUTE_REPARSE_POINT', 0x400):
++            raise ValueError('연결된 파일이나 폴더는 변경하지 않습니다: ' + str(item))
++    if not path.is_file():
++        raise ValueError('필요한 설치 파일이 없습니다: ' + str(path))
++
++
++def atomic_bytes(path: Path, data: bytes) -> None:
++    fd, name = tempfile.mkstemp(prefix='.oot-playback-', suffix='.tmp', dir=path.parent)
++    try:
++        with os.fdopen(fd, 'wb') as stream:
++            stream.write(data)
++            stream.flush()
++            os.fsync(stream.fileno())
++        os.replace(name, path)
++    finally:
++        if os.path.exists(name):
++            os.unlink(name)
++
++
++def apply(root: Path) -> dict:
++    root = root.absolute()
++    source = root / 'runtime/ov_input.c'
++    out = root / 'build/oot111'
++    exe = out / 'ocarina.exe'
++    python = root / 'ferramentas/python/python.exe'
++    ninja = root / 'ferramentas/bin/ninja.exe'
++    needed = [source, exe, python, ninja, root / 'tools/build_game.py', root / 'runtime/host.h',
++              root / 'tools/data/expected-oot111.json', root / 'generated/oot111/layout.json',
++              root / 'build/exefs/main', root / 'build/romfs/index.json',
++              root / 'ferramentas/llvm/bin/clang.exe']
++    for path in needed:
++        safe_file(path)
++    before = source.read_bytes()
++    after = patched_source(before)
++    receipt = out / 'ocarina-playback-fix.json'
++    try:
++        linked_hooks(exe)
++        already_linked = True
++    except ValueError:
++        already_linked = False
++    if before == after and already_linked:
++        return dict(status='already_fixed', fix=FIX_ID, game_exe=str(exe), receipt=str(receipt),
++                    message='연주 충돌 수정이 이미 실행 파일에 연결되어 있습니다.')
++    stamp = datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S-%f')
++    backup = out / 'playback-backup' / stamp
++    backup.mkdir(parents=True, exist_ok=False)
++    shutil.copy2(source, backup / 'ov_input.c')
++    shutil.copy2(exe, backup / 'ocarina.exe')
++    runtime_object = out / 'obj/runtime/ov_input.o'
++    if runtime_object.exists():
++        safe_file(runtime_object)
++        shutil.copy2(runtime_object, backup / 'ov_input.o')
++    log = out / 'ocarina-playback-build.log'
++    command = [str(python), 'tools/build_game.py', '--version', 'oot111', '--gen', 'generated/oot111',
++               '--out', str(out), '--expected', 'tools/data/expected-oot111.json',
++               '--exefs', str(root / 'build/exefs'), '--romfs', str(root / 'build/romfs'), '--jobs', '2',
++               '--toolchain', str(root / 'ferramentas/llvm'), '--deps', str(root / 'ferramentas/deps'),
++               '--ninja', str(ninja)]
++    try:
++        atomic_bytes(source, after)
++        if runtime_object.exists():
++            runtime_object.unlink()  # Invalidate this one runtime object even if the machine's clock moved backwards.
++        environment = dict(os.environ, PYTHONUTF8='1', PYTHONUNBUFFERED='1')
++        environment['PATH'] = os.pathsep.join([str(root / 'ferramentas/llvm/bin'), str(root / 'ferramentas/bin'),
++                                               str(root / 'ferramentas/deps/bin'), environment.get('PATH', '')])
++        with log.open('wb') as output:
++            built = subprocess.run(command, cwd=root, env=environment, stdout=output, stderr=subprocess.STDOUT,
++                                   creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
++        if built.returncode:
++            raise ValueError(f'로컬 컴파일 실패 (코드 {built.returncode}). 로그: {log}')
++        hooks = linked_hooks(exe)
++        record = dict(fix=FIX_ID, installed_at=datetime.now(timezone.utc).isoformat(),
++                      previous_exe_sha256=digest(backup / 'ocarina.exe'), exe_sha256=digest(exe),
++                      source_sha256=digest(source), verified_host_symbols=sorted(hooks), backup=str(backup))
++        atomic_bytes(receipt, json.dumps(record, ensure_ascii=False, indent=2).encode('utf-8'))
++        return dict(status='fixed', fix=FIX_ID, game_exe=str(exe), receipt=str(receipt), build_log=str(log),
++                    backup=str(backup), message='컨트롤러 진동 조회 수정과 실행 파일 연결 검사를 완료했습니다.')
++    except BaseException:
++        atomic_bytes(source, before)
++        shutil.copy2(backup / 'ocarina.exe', exe)
++        if (backup / 'ov_input.o').exists():
++            shutil.copy2(backup / 'ov_input.o', runtime_object)
++        elif runtime_object.exists():
++            runtime_object.unlink()
++        raise
++
++
++def main():
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument('--root', type=Path, required=True)
++    args = parser.parse_args()
++    try:
++        print(json.dumps(apply(args.root), ensure_ascii=True))
++        return 0
++    except (OSError, ValueError) as error:
++        print(json.dumps(dict(error=str(error)), ensure_ascii=True))
++        return 1
++
++
++if __name__ == '__main__':
++    raise SystemExit(main())
