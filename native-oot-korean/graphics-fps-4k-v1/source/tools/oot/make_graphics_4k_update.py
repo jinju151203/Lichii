@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 import subprocess
 import sys
+import tempfile
 import zipfile
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -30,6 +31,23 @@ SOURCE = ['instalador/update-graphics-4k.ps1', 'instalador/graphics-4k-bootstrap
 
 def fingerprint(raw):
     return hashlib.sha256(raw.replace(b'\r\n', b'\n')).hexdigest()
+
+
+def verify_bundled_helpers(archive):
+    """The installed embeddable Python also omits the script directory. Exercise the real ZIP with -I."""
+    with tempfile.TemporaryDirectory(prefix='oot-graphics-isolated-') as temp:
+        folder = Path(temp)
+        with zipfile.ZipFile(archive) as bundle:
+            bundle.extractall(folder)
+        script = folder / 'Ocarina-Graphics-4K/update_graphics_4k.py'
+        for arguments, expected in ((['--help'], 0), (['--root', str(folder / 'missing-install')], 1)):
+            result = subprocess.run([sys.executable, '-I', str(script), *arguments], cwd=folder,
+                                    capture_output=True, text=True, timeout=30)
+            if result.returncode != expected or 'Traceback' in result.stderr:
+                raise ValueError('Bundled helper failed under isolated Python: ' + result.stdout + result.stderr)
+            if expected and not json.loads(result.stdout).get('error'):
+                raise ValueError('Bundled helper did not reach installation validation')
+    print('PASS: actual bundled helpers load under isolated Python; installation preflight reached')
 
 
 def main():
@@ -61,6 +79,7 @@ def main():
         bundle.write(ROOT / 'docs/oot-graphics-fps-4k.md', prefix + 'README_KO.md')
     with zipfile.ZipFile(archive) as bundle:
         assert bundle.testzip() is None
+    verify_bundled_helpers(archive)
     subprocess.run([sys.executable, str(ROOT / 'tools/oot/package_singlefile.py'), str(archive),
                     '--cc', str(args.cc.absolute()), '--windres', str(args.windres.absolute()),
                     '--out', str(args.out.absolute()), '--graphics-4k'], check=True)

@@ -723,7 +723,7 @@
  
 --- /dev/null
 +++ b/tools/oot/make_graphics_4k_update.py
-@@ -0,0 +1,70 @@
+@@ -0,0 +1,89 @@
 +#!/usr/bin/env python3
 +"""Build a game-free native EXE that updates an existing Ocarina installation locally."""
 +import argparse
@@ -732,6 +732,7 @@
 +from pathlib import Path
 +import subprocess
 +import sys
++import tempfile
 +import zipfile
 +
 +ROOT = Path(__file__).resolve().parents[2]
@@ -756,6 +757,23 @@
 +
 +def fingerprint(raw):
 +    return hashlib.sha256(raw.replace(b'\r\n', b'\n')).hexdigest()
++
++
++def verify_bundled_helpers(archive):
++    """The installed embeddable Python also omits the script directory. Exercise the real ZIP with -I."""
++    with tempfile.TemporaryDirectory(prefix='oot-graphics-isolated-') as temp:
++        folder = Path(temp)
++        with zipfile.ZipFile(archive) as bundle:
++            bundle.extractall(folder)
++        script = folder / 'Ocarina-Graphics-4K/update_graphics_4k.py'
++        for arguments, expected in ((['--help'], 0), (['--root', str(folder / 'missing-install')], 1)):
++            result = subprocess.run([sys.executable, '-I', str(script), *arguments], cwd=folder,
++                                    capture_output=True, text=True, timeout=30)
++            if result.returncode != expected or 'Traceback' in result.stderr:
++                raise ValueError('Bundled helper failed under isolated Python: ' + result.stdout + result.stderr)
++            if expected and not json.loads(result.stdout).get('error'):
++                raise ValueError('Bundled helper did not reach installation validation')
++    print('PASS: actual bundled helpers load under isolated Python; installation preflight reached')
 +
 +
 +def main():
@@ -787,6 +805,7 @@
 +        bundle.write(ROOT / 'docs/oot-graphics-fps-4k.md', prefix + 'README_KO.md')
 +    with zipfile.ZipFile(archive) as bundle:
 +        assert bundle.testzip() is None
++    verify_bundled_helpers(archive)
 +    subprocess.run([sys.executable, str(ROOT / 'tools/oot/package_singlefile.py'), str(archive),
 +                    '--cc', str(args.cc.absolute()), '--windres', str(args.windres.absolute()),
 +                    '--out', str(args.out.absolute()), '--graphics-4k'], check=True)
@@ -1333,8 +1352,11 @@
  | Hookshot fixed resolution for Ocarina of Time 1.1.1: the dynamic-resolution branch (flag +0x94, fixed path and its 1.0 scale), the 30 dynamic frames before the fixed path | https://github.com/NotRexed/Hookshot @ `c02f290d47ff89d87ac444f32c0e8a39943a1c41` (`nx2/oot_patches.py`, `host/nn_vi.c`, pull request 102), NotRexed and contributors (the files carry no copyright line) | GPL-3.0 | `tools/oot/patch_generated.py` (FIXED_RES) |
 --- /dev/null
 +++ b/docs/oot-graphics-fps-4k.md
-@@ -0,0 +1,51 @@
+@@ -0,0 +1,54 @@
 +# 오카리나 그래픽 · FPS · 내부 4K 업데이트 v1
++
++패키지 수정: 설치된 Python의 격리 실행에서도 함께 압축된 보조 파일을 찾도록 검색 경로를 수정했습니다.
++기존 파일에서 발생한 `ModuleNotFoundError: No module named 'fix_ocarina_playback'`를 수정합니다.
 +
 +게임을 종료하고 `Ocarina_Graphics_FPS_4K_Update.exe`를 실행한 뒤 **기존 OcarinaRecomp 설치 폴더**를 선택하세요.
 +`ferramentas`, `runtime`, `generated`, `build` 폴더가 들어 있는 상위 폴더입니다.
@@ -1387,7 +1409,7 @@
 +게임 데이터, 생성된 게임 C, 저장 파일과 개인 로그는 포함하지 않습니다.
 --- /dev/null
 +++ b/tools/oot/update_graphics_4k.py
-@@ -0,0 +1,230 @@
+@@ -0,0 +1,233 @@
 +#!/usr/bin/env python3
 +"""Transactional source update for an existing owned-game Ocarina native installation."""
 +from __future__ import annotations
@@ -1403,6 +1425,9 @@
 +import sys
 +import uuid
 +
++# The installed embeddable Python uses python314._pth and omits the script's folder,
++# just like -I. Resolve bundled siblings explicitly before importing either helper.
++sys.path.insert(0, str(Path(__file__).resolve().parent))
 +from fix_ocarina_playback import atomic_bytes, digest, linked_hooks, patched_source, safe_file
 +from patch_generated import DYN_DT, FIXED_RES, upgrade_fixed_resolution
 +

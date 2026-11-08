@@ -13,6 +13,9 @@ import subprocess
 import sys
 import uuid
 
+# The installed embeddable Python uses python314._pth and omits the script's folder,
+# just like -I. Resolve bundled siblings explicitly before importing either helper.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 from fix_ocarina_playback import atomic_bytes, digest, linked_hooks, patched_source, safe_file
 from patch_generated import DYN_DT, FIXED_RES, upgrade_fixed_resolution
 

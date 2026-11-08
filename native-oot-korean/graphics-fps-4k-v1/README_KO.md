@@ -1,5 +1,8 @@
 # 오카리나 그래픽 · FPS · 내부 4K 업데이트 v1
 
+패키지 수정: 설치된 Python의 격리 실행에서도 함께 압축된 보조 파일을 찾도록 검색 경로를 수정했습니다.
+기존 파일에서 발생한 `ModuleNotFoundError: No module named 'fix_ocarina_playback'`를 수정합니다.
+
 게임을 종료하고 `Ocarina_Graphics_FPS_4K_Update.exe`를 실행한 뒤 **기존 OcarinaRecomp 설치 폴더**를 선택하세요.
 `ferramentas`, `runtime`, `generated`, `build` 폴더가 들어 있는 상위 폴더입니다.
 NUP를 다시 선택하거나 처음부터 재설치할 필요가 없습니다. 저장 파일과 한국어, 컨트롤러 설정은 유지합니다.
