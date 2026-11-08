@@ -1,0 +1,30 @@
+diff --git a/runtime/ov_input.c b/runtime/ov_input.c
+index 1f31def..dbdbfa1 100644
+--- a/runtime/ov_input.c
++++ b/runtime/ov_input.c
+@@ -393,6 +393,16 @@ static void ov_vib_mounted(Cpu *c) {
+     ret_x(c, 0);
+ }
+ 
++// Switch 2's mount query uses the same host channel mapping as the existing vibration query.
++// Ocarina asks this while starting controller-driven playback; its SDK otherwise opens the unimplemented hid service.
++// Behavior reference: seedds/nxnative dm/host/hle_hid.c, blob 8e280577c6c1851524e2b2fc4797d8664de09dcb.
++static void ov_vib_mounted_ounce(Cpu *c) {
++    const uint32_t *h = need_handle(arg_p(c, 0), "IsOunceVibrationDeviceMounted");
++    static volatile int32_t asked;
++    once(&asked, "hid: Ounce vibration mount query handled by host (device %#x)", *h);
++    ret_x(c, vibration_side(h, "IsOunceVibrationDeviceMounted") >= 0);
++}
++
+ // Result detail::IsVibrationPermitted(bool *out)
+ static void ov_vib_permitted(Cpu *c) {
+     uint8_t *out = arg_p(c, 0);
+@@ -547,6 +557,8 @@ HOST_OVERRIDE("_ZN2nn3hid6detail23GetActualVibrationValueEPNS0_14VibrationValueE
+ HOST_OVERRIDE("_ZN2nn3hid6detail22GetVibrationDeviceInfoEPNS0_19VibrationDeviceInfoERKNS0_21VibrationDeviceHandleE",
+               ov_vib_info);
+ HOST_OVERRIDE("_ZN2nn3hid6detail24IsVibrationDeviceMountedEPbRKNS0_21VibrationDeviceHandleE", ov_vib_mounted);
++HOST_OVERRIDE("_ZN2nn3hid29IsOunceVibrationDeviceMountedERKNS0_21VibrationDeviceHandleE", ov_vib_mounted_ounce);
++HOST_OVERRIDE("_ZN2nn3hid6detail29IsOunceVibrationDeviceMountedEPbRKNS0_21VibrationDeviceHandleE", ov_vib_mounted);
+ HOST_OVERRIDE("_ZN2nn3hid6detail20IsVibrationPermittedEPb", ov_vib_permitted);
+ HOST_OVERRIDE("_ZN2nn3hid6detail15PermitVibrationEb", ov_vib_permit);
+ HOST_OVERRIDE("_ZN2nn3hid6detail18StartSixAxisSensorERKNS0_19SixAxisSensorHandleE", ov_six_start);
